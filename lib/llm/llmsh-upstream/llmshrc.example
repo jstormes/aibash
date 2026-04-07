@@ -1,0 +1,27 @@
+# llmsh configuration
+# Copy to ~/.llmshrc
+#
+# [settings] section for global options.
+# Each other [section] defines a named server.
+# Switch at runtime with: /server <name>
+# List servers with: /server
+
+[settings]
+max_iterations = 20    # max tool-call rounds per user input (default: 20)
+man_enrich = 1         # 0=off, 1=auto whatis summaries with run (default)
+man_max_bytes = 4096   # max bytes for man page detail lookups
+
+[local]
+url = http://ai:8080/v1/chat/completions
+model = llama3
+# key = (none needed for local)
+
+[openai]
+url = https://api.openai.com/v1/chat/completions
+model = gpt-4o
+key = sk-your-key-here
+
+[anthropic]
+url = https://api.anthropic.com/v1/messages
+model = claude-sonnet-4-20250514
+key = sk-ant-your-key-here

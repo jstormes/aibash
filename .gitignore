@@ -1,0 +1,63 @@
+# Build artifacts
+*.o
+*.a
+*.dSYM/
+.build
+.made
+
+# Generated binaries
+/bash
+/bashversion
+/mksyntax
+/mksignames
+/bashbug
+
+# Generated source files
+/y.tab.c
+/y.tab.h
+/syntax.c
+/signames.h
+/lsignames.h
+/buildconf.h
+/config.h
+/config.log
+/config.status
+/stamp-h
+/Makefile
+/parser-built
+
+# Builtin generated files
+/builtins/builtins.c
+/builtins/builtext.h
+/builtins/Makefile
+/builtins/mkbuiltins
+/builtins/psize.aux
+/builtins/pipesize.h
+/builtins/tmpbuiltins.*
+
+# Lib generated makefiles
+/lib/*/Makefile
+!/lib/llm/Makefile
+
+# LLM library generated
+/lib/llm/*.o
+/lib/llm/libllm.a
+!/lib/llm/Makefile
+
+# Support tools
+/support/man2html
+/support/man2html.o
+
+# Test artifacts
+/tests/recho
+/tests/zecho
+/tests/printenv
+/tests/xcase
+
+# autoconf cache
+/autom4te.cache/
+
+# Examples
+/examples/loadables/*.o
+/examples/loadables/*.so
+/examples/loadables/Makefile

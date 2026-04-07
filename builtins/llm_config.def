@@ -1,0 +1,164 @@
+This file is llm_config.def, from which is created llm_config.c.
+It implements the builtin "llm_config" in Bash.
+
+Copyright (C) 2024 Free Software Foundation, Inc.
+
+This file is part of GNU Bash, the Bourne Again SHell.
+
+Bash is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Bash is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Bash.  If not, see <http://www.gnu.org/licenses/>.
+
+$PRODUCES llm_config.c
+
+$BUILTIN llm_config
+$DEPENDS_ON HAVE_LLM
+$FUNCTION llm_config_builtin
+$SHORT_DOC llm_config [--list] [--switch name] [--verbose] [--labels] [--debug]
+Configure the LLM subsystem at runtime.
+
+Options:
+  --list      list all configured LLM servers (* marks active)
+  --switch NAME  switch to a different LLM server by name
+  --verbose   toggle tool output visibility on stdout
+  --labels    toggle [chat]/[stdout]/[tool] label prefixes
+  --debug     toggle debug mode (labels + [api] request/response info)
+
+Without arguments, shows current configuration.
+
+Servers are defined in ~/.bashllmrc as [name] sections. The first
+server is active by default. Switching servers clears conversation
+history and reinitializes the API client.
+
+Exit Status:
+Returns success unless LLM is not initialized or server not found.
+$END
+
+#include <config.h>
+
+#if defined (HAVE_LLM)
+
+#if defined (HAVE_UNISTD_H)
+#  include <unistd.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../shell.h"
+#include "common.h"
+
+#include "../lib/llm/llm_shell.h"
+#include "../lib/llm/llm_api.h"
+#include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_streams.h"
+#include "../lib/llm/llm_serverconf.h"
+
+/* These are defined in llm.def */
+extern int g_llm_initialized;
+extern server_config_t *g_servers;
+extern llm_shell_ctx_t g_ctx;
+
+int
+llm_config_builtin (WORD_LIST *list)
+{
+    if (!g_llm_initialized) {
+        builtin_error("LLM not initialized (run llm_init first)");
+        return (EXECUTION_FAILURE);
+    }
+
+    if (!list) {
+        /* No arguments: show current config */
+        const server_entry_t *active = llm_serverconf_active(g_servers);
+        printf("Active server: %s (%s @ %s)\n",
+               active->name, active->model,
+               active->api_url ? active->api_url : "(none)");
+        printf("Max iterations: %d\n", g_ctx.max_iterations);
+        printf("Tool output: %s\n", streams_verbose ? "visible" : "hidden");
+        printf("Label mode: %d\n", streams_label_mode);
+        return (EXECUTION_SUCCESS);
+    }
+
+    while (list) {
+        const char *arg = list->word->word;
+
+        if (strcmp(arg, "--list") == 0) {
+            llm_serverconf_list(g_servers);
+        }
+        else if (strcmp(arg, "--switch") == 0) {
+            list = list->next;
+            if (!list) {
+                builtin_error("--switch requires a server name");
+                return (EX_USAGE);
+            }
+            const char *name = list->word->word;
+            if (llm_serverconf_switch(g_servers, name) != 0) {
+                builtin_error("unknown server '%s'", name);
+                return (EXECUTION_FAILURE);
+            }
+
+            const server_entry_t *s = llm_serverconf_active(g_servers);
+            llm_api_cleanup();
+            if (llm_api_init(s->api_url, s->model, s->api_key) != 0) {
+                builtin_error("failed to connect to %s", s->name);
+                return (EXECUTION_FAILURE);
+            }
+
+            llm_history_cleanup();
+            llm_history_init();
+            free(g_ctx.last_output);
+            g_ctx.last_output = NULL;
+
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Switched to %s (%s)\n", s->name, s->model);
+            stream_chat_output(msg);
+        }
+        else if (strcmp(arg, "--verbose") == 0) {
+            streams_verbose = !streams_verbose;
+            stream_chat_output(streams_verbose
+                ? "Tool output: visible\n"
+                : "Tool output: hidden\n");
+        }
+        else if (strcmp(arg, "--labels") == 0) {
+            streams_label_mode = streams_label_mode ? 0 : 1;
+            stream_chat_output(streams_label_mode
+                ? "Labels: on\n" : "Labels: off\n");
+        }
+        else if (strcmp(arg, "--debug") == 0) {
+            streams_label_mode = (streams_label_mode == 2) ? 0 : 2;
+            stream_chat_output(streams_label_mode == 2
+                ? "Debug mode: on (labels + API)\n"
+                : "Debug mode: off\n");
+        }
+        else {
+            builtin_error("unknown option '%s'", arg);
+            return (EX_USAGE);
+        }
+
+        list = list->next;
+    }
+
+    return (EXECUTION_SUCCESS);
+}
+
+#else /* !HAVE_LLM */
+
+int
+llm_config_builtin (WORD_LIST *list)
+{
+    (void)list;
+    builtin_error("LLM support not compiled in (configure with --enable-llm)");
+    return (EXECUTION_FAILURE);
+}
+
+#endif /* HAVE_LLM */

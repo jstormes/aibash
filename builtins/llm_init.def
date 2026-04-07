@@ -1,0 +1,196 @@
+This file is llm_init.def, from which is created llm_init.c.
+It implements the builtin "llm_init" in Bash.
+
+Copyright (C) 2024 Free Software Foundation, Inc.
+
+This file is part of GNU Bash, the Bourne Again SHell.
+
+Bash is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Bash is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Bash.  If not, see <http://www.gnu.org/licenses/>.
+
+$PRODUCES llm_init.c
+
+$BUILTIN llm_init
+$DEPENDS_ON HAVE_LLM
+$FUNCTION llm_init_builtin
+$SHORT_DOC llm_init [-n]
+Initialize the LLM subsystem.
+
+Options:
+  -n	do not install command_not_found_handle (overrides config)
+
+In interactive shells, llm_init runs automatically at startup.
+It can also be called manually or from ~/.bashrc.
+
+Initialization performs the following steps:
+  1. Loads configuration from ~/.bashllmrc (INI format)
+  2. Falls back to BASH_LLM_API_URL, BASH_LLM_MODEL, BASH_LLM_API_KEY
+     environment variables if no config file exists
+  3. Initializes the HTTP/SSE client (libcurl)
+  4. Indexes man page summaries for tool enrichment
+  5. Installs command_not_found_handle shell function (if enabled)
+
+The command_not_found_handle is installed when ALL of:
+  - The -n flag is NOT passed
+  - command_not_found = 1 in ~/.bashllmrc [settings] (default: 0)
+  - The shell is interactive
+
+When installed, unrecognized commands are sent to the LLM as
+natural language queries (e.g., typing "hello" runs: llm hello).
+
+Configuration file (~/.bashllmrc):
+  [settings]
+  max_iterations = 20       # max tool-call rounds per query
+  man_enrich = 1            # auto-inject man summaries with commands
+  command_not_found = 1     # route unknown commands to LLM (default: 0)
+
+  [servername]
+  url = http://host:port/v1/chat/completions
+  model = model-name
+  key = optional-api-key
+
+Exit Status:
+Returns success unless initialization fails.
+$END
+
+#include <config.h>
+
+#if defined (HAVE_LLM)
+
+#if defined (HAVE_UNISTD_H)
+#  include <unistd.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../shell.h"
+#include "common.h"
+#include "bashgetopt.h"
+
+/* For evalstring */
+extern int evalstring (char *, const char *, int);
+#define SEVAL_NOHIST 0x004
+
+#include "../lib/llm/llm_shell.h"
+#include "../lib/llm/llm_api.h"
+#include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_streams.h"
+#include "../lib/llm/llm_serverconf.h"
+#include "../lib/llm/llm_router.h"
+#include "../lib/llm/llm_manscan.h"
+#include "../lib/llm/llm_tools.h"
+
+/* These are defined in llm.def but we need to access them */
+extern int g_llm_initialized;
+extern server_config_t *g_servers;
+extern llm_shell_ctx_t g_ctx;
+extern llm_stream_cbs g_stream_cbs;
+
+int
+llm_init_builtin (WORD_LIST *list)
+{
+    int opt, no_hook = 0;
+
+    reset_internal_getopt();
+    while ((opt = internal_getopt(list, "n")) != -1) {
+        switch (opt) {
+        case 'n':
+            no_hook = 1;
+            break;
+            CASE_HELPOPT;
+        default:
+            builtin_usage();
+            return (EX_USAGE);
+        }
+    }
+
+    if (g_llm_initialized) {
+        builtin_warning("LLM subsystem already initialized");
+        return (EXECUTION_SUCCESS);
+    }
+
+    /* Load config */
+    g_servers = llm_serverconf_load();
+    if (!g_servers) {
+        builtin_error("failed to load LLM configuration");
+        return (EXECUTION_FAILURE);
+    }
+
+    const server_entry_t *active = llm_serverconf_active(g_servers);
+
+    /* Initialize subsystems */
+    if (llm_api_init(active->api_url, active->model, active->api_key) != 0) {
+        builtin_error("failed to initialize LLM API client");
+        llm_serverconf_free(g_servers);
+        g_servers = NULL;
+        return (EXECUTION_FAILURE);
+    }
+
+    llm_streams_init();
+    llm_history_init();
+
+    int man_count = llm_manscan_init();
+    llm_tools_init();
+    llm_router_init(g_servers);
+
+    /* Set up streaming callbacks -- same as llm builtin's ensure_initialized */
+    extern void chat_token_cb(const char *token, void *userdata);
+    extern void think_token_cb(const char *token, void *userdata);
+    g_stream_cbs.on_token = chat_token_cb;
+    g_stream_cbs.on_thinking = think_token_cb;
+    g_stream_cbs.userdata = NULL;
+
+    /* Set up context */
+    g_ctx.servers = g_servers;
+    g_ctx.cbs = &g_stream_cbs;
+    g_ctx.last_output = NULL;
+    g_ctx.max_iterations = g_servers->max_iterations;
+
+    g_llm_initialized = 1;
+
+    /*
+     * Install command_not_found_handle when:
+     *   - not suppressed with -n flag
+     *   - config has command_not_found = 1 (default)
+     *   - shell is interactive (not a script or bash -c)
+     */
+    if (!no_hook && g_servers->command_not_found && interactive_shell) {
+        char *hook_cmd = strdup("command_not_found_handle() { llm \"$@\"; return $?; }");
+        evalstring(hook_cmd, "llm_init", SEVAL_NOHIST);
+    }
+
+    /* Report */
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "LLM initialized: %s (%s), %d man pages indexed\n",
+                 active->name, active->model, man_count);
+        stream_chat_output(msg);
+    }
+
+    return (EXECUTION_SUCCESS);
+}
+
+#else /* !HAVE_LLM */
+
+int
+llm_init_builtin (WORD_LIST *list)
+{
+    (void)list;
+    builtin_error("LLM support not compiled in (configure with --enable-llm)");
+    return (EXECUTION_FAILURE);
+}
+
+#endif /* HAVE_LLM */

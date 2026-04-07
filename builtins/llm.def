@@ -1,0 +1,213 @@
+This file is llm.def, from which is created llm.c.
+It implements the builtin "llm" in Bash.
+
+Copyright (C) 2024 Free Software Foundation, Inc.
+
+This file is part of GNU Bash, the Bourne Again SHell.
+
+Bash is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Bash is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Bash.  If not, see <http://www.gnu.org/licenses/>.
+
+$PRODUCES llm.c
+
+$BUILTIN llm
+$DEPENDS_ON HAVE_LLM
+$FUNCTION llm_builtin
+$SHORT_DOC llm [-c] [query ...]
+Send a query to an LLM and run the agentic tool loop.
+
+Options:
+  -c	clear conversation history
+
+Concatenates arguments into a query and sends it to the configured
+LLM server. The LLM can call tools (ls, cat, grep, run, man, etc.)
+and will iterate until it produces a final text answer or the max
+iterations limit is reached.
+
+LLM responses stream to stdout. Tool status goes to stderr.
+
+The LLM subsystem auto-initializes on first use if llm_init has
+not been called. In interactive shells, llm_init runs automatically
+at startup.
+
+Configuration is read from ~/.bashllmrc (INI format). See llm_init
+and llm_config for details.
+
+Exit Status:
+Returns success unless the LLM request fails.
+$END
+
+#include <config.h>
+
+#if defined (HAVE_LLM)
+
+#if defined (HAVE_UNISTD_H)
+#  include <unistd.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../shell.h"
+#include "common.h"
+#include "bashgetopt.h"
+
+#include "../lib/llm/llm_shell.h"
+#include "../lib/llm/llm_api.h"
+#include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_streams.h"
+#include "../lib/llm/llm_serverconf.h"
+#include "../lib/llm/llm_router.h"
+#include "../lib/llm/llm_manscan.h"
+#include "../lib/llm/llm_tools.h"
+
+/* Global state for the LLM subsystem (non-static: shared with llm_init, llm_config) */
+int g_llm_initialized = 0;
+server_config_t *g_servers = NULL;
+llm_shell_ctx_t g_ctx;
+llm_stream_cbs g_stream_cbs;
+
+/* Streaming callbacks (non-static: shared with llm_init) */
+void chat_token_cb(const char *token, void *userdata)
+{
+    (void)userdata;
+    stream_chat_output(token);
+}
+
+void think_token_cb(const char *token, void *userdata)
+{
+    (void)userdata;
+    stream_think_output(token);
+}
+
+/* Auto-initialize if not already done */
+static int ensure_initialized(void)
+{
+    if (g_llm_initialized)
+        return 0;
+
+    /* Load config */
+    g_servers = llm_serverconf_load();
+    if (!g_servers) {
+        builtin_error("failed to load LLM configuration");
+        return 1;
+    }
+
+    const server_entry_t *active = llm_serverconf_active(g_servers);
+
+    /* Initialize subsystems */
+    if (llm_api_init(active->api_url, active->model, active->api_key) != 0) {
+        builtin_error("failed to initialize LLM API client");
+        llm_serverconf_free(g_servers);
+        g_servers = NULL;
+        return 1;
+    }
+
+    llm_streams_init();
+    llm_history_init();
+    llm_manscan_init();
+    llm_tools_init();
+    llm_router_init(g_servers);
+
+    /* Set up streaming callbacks */
+    g_stream_cbs.on_token = chat_token_cb;
+    g_stream_cbs.on_thinking = think_token_cb;
+    g_stream_cbs.userdata = NULL;
+
+    /* Set up context */
+    g_ctx.servers = g_servers;
+    g_ctx.cbs = &g_stream_cbs;
+    g_ctx.last_output = NULL;
+    g_ctx.max_iterations = g_servers->max_iterations;
+
+    g_llm_initialized = 1;
+    return 0;
+}
+
+int
+llm_builtin (WORD_LIST *list)
+{
+    int opt, clear_flag = 0;
+
+    /* Auto-init */
+    if (ensure_initialized() != 0)
+        return (EXECUTION_FAILURE);
+
+    reset_internal_getopt();
+    while ((opt = internal_getopt(list, "c")) != -1) {
+        switch (opt) {
+        case 'c':
+            clear_flag = 1;
+            break;
+            CASE_HELPOPT;
+        default:
+            builtin_usage();
+            return (EX_USAGE);
+        }
+    }
+    list = loptend;
+
+    if (clear_flag) {
+        llm_history_cleanup();
+        llm_history_init();
+        free(g_ctx.last_output);
+        g_ctx.last_output = NULL;
+        stream_chat_output("Conversation history cleared.\n");
+        if (!list)
+            return (EXECUTION_SUCCESS);
+    }
+
+    /* No arguments = nothing to do */
+    if (!list) {
+        builtin_usage();
+        return (EX_USAGE);
+    }
+
+    /* Concatenate arguments into query string */
+    char *query = string_list(list);
+    if (!query || !*query) {
+        free(query);
+        return (EXECUTION_SUCCESS);
+    }
+
+    /* Run the agentic loop */
+    char *result = llm_shell_query(&g_ctx, query, NULL);
+    free(query);
+
+    if (result) {
+        /* Final text was already streamed via callback */
+        free(result);
+    }
+
+    /* Sync working directory in case LLM's cd tool changed it */
+    {
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd)))
+            set_working_directory(cwd);
+    }
+
+    return (EXECUTION_SUCCESS);
+}
+
+#else /* !HAVE_LLM */
+
+int
+llm_builtin (WORD_LIST *list)
+{
+    (void)list;
+    builtin_error("LLM support not compiled in (configure with --enable-llm)");
+    return (EXECUTION_FAILURE);
+}
+
+#endif /* HAVE_LLM */
