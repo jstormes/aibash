@@ -42,6 +42,11 @@
    shell execution with `set +o braceexpand'. */
 #undef BRACE_EXPANSION
 
+/* Define HAVE_LLM to enable the built-in LLM subsystem.
+   This is on by default.  Requires libcurl.
+   You can disable it with --disable-llm. */
+#undef HAVE_LLM
+
 /* Define READLINE to get the nifty/glitzy editing features.
    This is on by default.  You can turn it off interactively
    with the -nolineediting flag. */
