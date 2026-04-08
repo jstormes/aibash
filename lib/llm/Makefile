@@ -1,8 +1,12 @@
 # Makefile for lib/llm -- LLM integration library for bash
+#
+# This builds libllm.a containing the LLM API client, tool system,
+# agentic loop, and supporting modules.
 
 srcdir = .
+
 topdir = ../..
-BUILD_DIR = ../..
+BUILD_DIR = /data/bash/bash-5.3
 
 CC = gcc
 RANLIB = ranlib
@@ -10,15 +14,15 @@ AR = ar
 ARFLAGS = cr
 RM = rm -f
 
-SHELL = /bin/bash
+SHELL = /bin/sh
 
-CFLAGS = -Wall -Wextra -O2
-LOCAL_CFLAGS =
+CFLAGS = -g -O2
+LOCAL_CFLAGS = 
 
-CPPFLAGS =
-LDFLAGS =
+CPPFLAGS = 
+LDFLAGS =  -L./lib/termcap
 
-DEFS = -DHAVE_CONFIG_H -DHAVE_LLM
+DEFS = -DHAVE_CONFIG_H
 
 INCLUDES = -I. -I$(srcdir) -I$(topdir) -I$(topdir)/include -I$(topdir)/lib
 
