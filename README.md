@@ -66,9 +66,8 @@ sudo apt install libcurl4-openssl-dev libreadline-dev
 make
 ```
 
-The LLM integration is compiled in when `libcurl` is available. The `HAVE_LLM`
-flag in `config.h` controls this. Without it, the `llm`, `llm_init`, and
-`llm_config` builtins compile as stubs.
+`configure` will fail with an error if `libcurl` is not installed, since it
+is required for the LLM integration.
 
 ## Quick Start
 

@@ -187,7 +187,6 @@ opt_dev_fd_stat_broken=no
 opt_alt_array_impl=no
 opt_translatable_strings=yes
 opt_bash_source_fullpath_default=no
-opt_llm=yes
 
 dnl modified by alternate array implementation option
 ARRAY_O=array.o
@@ -256,7 +255,6 @@ AC_ARG_ENABLE(strict-posix-default, AS_HELP_STRING([--enable-strict-posix-defaul
 AC_ARG_ENABLE(translatable-strings, AS_HELP_STRING([--enable-translatable-strings], [include support for $"..." translatable strings]), opt_translatable_strings=$enableval)
 AC_ARG_ENABLE(usg-echo-default, AS_HELP_STRING([--enable-usg-echo-default], [a synonym for --enable-xpg-echo-default]), opt_xpg_echo=$enableval)
 AC_ARG_ENABLE(xpg-echo-default, AS_HELP_STRING([--enable-xpg-echo-default], [make the echo builtin expand escape sequences by default]), opt_xpg_echo=$enableval)
-AC_ARG_ENABLE(llm, AS_HELP_STRING([--enable-llm], [enable built-in LLM support (requires libcurl)]), opt_llm=$enableval)
 
 dnl options that alter how bash is compiled and linked
 AC_ARG_ENABLE(mem-scramble, AS_HELP_STRING([--enable-mem-scramble], [scramble memory on calls to malloc and free]), opt_memscramble=$enableval)
@@ -688,24 +686,15 @@ AC_SUBST(TILDE_LIB)
 dnl END READLINE and HISTORY LIBRARY SECTION
 
 dnl BEGIN LLM LIBRARY SECTION
-if test $opt_llm = yes; then
-	AC_CHECK_LIB(curl, curl_easy_init, [have_curl=yes], [have_curl=no])
-	if test "$have_curl" = "yes"; then
-		AC_DEFINE(HAVE_LLM)
-		LLM_LIB=-lllm
-		LLM_DEP='$(LLM_LIBDIR)/libllm.a'
-		CURL_LIB=-lcurl
-	else
-		AC_MSG_WARN([libcurl not found -- disabling LLM support])
-		opt_llm=no
-		LLM_LIB=
-		LLM_DEP=
-		CURL_LIB=
-	fi
+dnl libcurl is required for aibash -- fail if not found
+AC_CHECK_LIB(curl, curl_easy_init, [have_curl=yes], [have_curl=no])
+if test "$have_curl" = "yes"; then
+	AC_DEFINE(HAVE_LLM)
+	LLM_LIB=-lllm
+	LLM_DEP='$(LLM_LIBDIR)/libllm.a'
+	CURL_LIB=-lcurl
 else
-	LLM_LIB=
-	LLM_DEP=
-	CURL_LIB=
+	AC_MSG_ERROR([libcurl is required for aibash. Install libcurl4-openssl-dev (Debian/Ubuntu) or libcurl-devel (Fedora/RHEL).])
 fi
 AC_SUBST(LLM_LIB)
 AC_SUBST(LLM_DEP)
