@@ -260,9 +260,29 @@ mechanism.
 
 ### Dependencies
 
-- **libcurl** -- HTTP client for LLM API (with SSE streaming)
-- **libreadline** -- Line editing (standard bash dependency)
-- **cJSON** -- JSON parsing (vendored in `lib/llm/`, no install needed)
+| Library | Purpose | Required |
+|---------|---------|----------|
+| **libcurl** | HTTP client for LLM API (SSE streaming) | Yes |
+| **libreadline** | Line editing, history, Shift-Tab binding | Yes |
+| **cJSON** | JSON parsing | Vendored (no install needed) |
+
+Install development packages:
+
+```bash
+# Debian / Ubuntu
+sudo apt install libcurl4-openssl-dev libreadline-dev
+
+# Fedora / RHEL
+sudo dnf install libcurl-devel readline-devel
+
+# Arch
+sudo pacman -S curl readline
+
+# macOS (Homebrew)
+brew install curl readline
+```
+
+`configure` will fail with a clear error if libcurl is missing.
 
 ---
 
