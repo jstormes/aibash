@@ -115,7 +115,8 @@ llm_config_builtin (WORD_LIST *list)
             }
 
             llm_history_cleanup();
-            llm_history_init();
+            extern const char *llm_history_path(void);
+            llm_history_init(llm_history_path());
             free(g_ctx.last_output);
             g_ctx.last_output = NULL;
 

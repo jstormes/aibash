@@ -5,7 +5,11 @@
 
 /* Manage conversation history for LLM context */
 
-void llm_history_init(void);
+/*
+ * Initialize history. If history_file is not NULL, loads persisted
+ * messages from that file (JSON array). Pass NULL to disable persistence.
+ */
+void llm_history_init(const char *history_file);
 void llm_history_cleanup(void);
 
 void llm_history_add_user(const char *text);

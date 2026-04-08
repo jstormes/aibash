@@ -79,6 +79,18 @@ llm_shell_ctx_t g_ctx;
 llm_stream_cbs g_stream_cbs;
 
 /* Streaming callbacks (non-static: shared with llm_init) */
+/* Build ~/.aibash_llm_history path. Returns static buffer. */
+const char *llm_history_path(void)
+{
+    static char path[4096];
+    const char *home = getenv("HOME");
+    if (home)
+        snprintf(path, sizeof(path), "%s/.aibash_llm_history", home);
+    else
+        snprintf(path, sizeof(path), ".aibash_llm_history");
+    return path;
+}
+
 void chat_token_cb(const char *token, void *userdata)
 {
     (void)userdata;
@@ -115,7 +127,7 @@ static int ensure_initialized(void)
     }
 
     llm_streams_init();
-    llm_history_init();
+    llm_history_init(llm_history_path());
     llm_manscan_init();
     llm_tools_init();
     llm_router_init(g_servers);
@@ -160,7 +172,7 @@ llm_builtin (WORD_LIST *list)
 
     if (clear_flag) {
         llm_history_cleanup();
-        llm_history_init();
+        llm_history_init(llm_history_path());
         free(g_ctx.last_output);
         g_ctx.last_output = NULL;
         stream_chat_output("Conversation history cleared.\n");

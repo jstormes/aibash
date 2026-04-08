@@ -15,14 +15,103 @@ static int msg_count = 0;
 static int msg_cap = 0;
 static int msg_max = 0;
 
-void llm_history_init(void)
+/* Path to the persistent history file, or NULL if disabled */
+static char *g_history_file = NULL;
+
+/* ---- Persistence ---- */
+
+static void history_save(void)
+{
+    if (!g_history_file) return;
+
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr) return;
+
+    for (int i = 0; i < msg_count; i++) {
+        if (!messages[i].message) continue;
+        cJSON *copy = cJSON_Duplicate(messages[i].message, 1);
+        if (copy) cJSON_AddItemToArray(arr, copy);
+    }
+
+    char *json = cJSON_Print(arr);
+    cJSON_Delete(arr);
+    if (!json) return;
+
+    FILE *f = fopen(g_history_file, "w");
+    if (f) {
+        fputs(json, f);
+        fclose(f);
+    }
+    free(json);
+}
+
+static void history_load(void)
+{
+    if (!g_history_file) return;
+
+    FILE *f = fopen(g_history_file, "r");
+    if (!f) return;
+
+    /* Read entire file */
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    if (len <= 0) { fclose(f); return; }
+    fseek(f, 0, SEEK_SET);
+
+    char *buf = malloc(len + 1);
+    if (!buf) { fclose(f); return; }
+    size_t nread = fread(buf, 1, len, f);
+    fclose(f);
+    buf[nread] = '\0';
+
+    /* Parse JSON array of messages */
+    cJSON *arr = cJSON_Parse(buf);
+    free(buf);
+    if (!arr || !cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return;
+    }
+
+    int n = cJSON_GetArraySize(arr);
+    /* Only load the last msg_max messages if there are more */
+    int start = (n > msg_max) ? n - msg_max : 0;
+
+    for (int i = start; i < n; i++) {
+        cJSON *item = cJSON_GetArrayItem(arr, i);
+        if (!item) continue;
+        cJSON *copy = cJSON_Duplicate(item, 1);
+        if (!copy) continue;
+
+        /* Grow if needed */
+        if (msg_count >= msg_cap) {
+            msg_cap = (msg_cap == 0) ? 64 : msg_cap * 2;
+            messages = realloc(messages, msg_cap * sizeof(message_t));
+            if (!messages) { cJSON_Delete(copy); break; }
+        }
+        messages[msg_count].message = copy;
+        msg_count++;
+    }
+
+    cJSON_Delete(arr);
+}
+
+/* ---- Core ---- */
+
+void llm_history_init(const char *history_file)
 {
     msg_count = 0;
     msg_max = BASH_LLM_MAX_HISTORY * 3;
+
+    free(g_history_file);
+    g_history_file = history_file ? strdup(history_file) : NULL;
+
     if (!messages) {
         msg_cap = msg_max;
         messages = calloc(msg_cap, sizeof(message_t));
     }
+
+    /* Load previous session */
+    history_load();
 }
 
 void llm_history_cleanup(void)
@@ -32,6 +121,8 @@ void llm_history_cleanup(void)
         messages[i].message = NULL;
     }
     msg_count = 0;
+    /* Save empty history on cleanup (e.g., llm -c) */
+    history_save();
 }
 
 static void add_json_message(cJSON *msg)
@@ -54,6 +145,9 @@ static void add_json_message(cJSON *msg)
 
     messages[msg_count].message = msg;
     msg_count++;
+
+    /* Persist after every message */
+    history_save();
 }
 
 void llm_history_add_user(const char *text)

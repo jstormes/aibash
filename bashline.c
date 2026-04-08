@@ -488,7 +488,8 @@ llm_cycle_server (int count, int key)
 
   /* Clear history for fresh context with new model */
   llm_history_cleanup ();
-  llm_history_init ();
+  extern const char *llm_history_path(void);
+  llm_history_init (llm_history_path ());
   free (g_ctx.last_output);
   g_ctx.last_output = NULL;
 

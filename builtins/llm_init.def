@@ -139,7 +139,8 @@ llm_init_builtin (WORD_LIST *list)
     }
 
     llm_streams_init();
-    llm_history_init();
+    extern const char *llm_history_path(void);
+    llm_history_init(llm_history_path());
 
     int man_count = llm_manscan_init();
     llm_tools_init();
