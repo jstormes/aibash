@@ -64,10 +64,21 @@ sudo apt install libcurl4-openssl-dev libreadline-dev
 # Build
 ./configure
 make
+
+# Install to /usr/local/bin/aibash
+sudo make install
 ```
 
 `configure` will fail with an error if `libcurl` is not installed, since it
 is required for the LLM integration.
+
+To install to a different location, use `--prefix`:
+
+```bash
+./configure --prefix=/opt/aibash
+make
+sudo make install    # installs to /opt/aibash/bin/aibash
+```
 
 ## Quick Start
 
