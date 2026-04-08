@@ -105,7 +105,7 @@ EOF
 3. Launch:
 
 ```bash
-./bash
+./aibash
 ```
 
 The LLM subsystem initializes automatically in interactive shells.
