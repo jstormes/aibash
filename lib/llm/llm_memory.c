@@ -32,6 +32,7 @@ static void memory_save_to_disk(void)
             cJSON_AddStringToObject(entry, "keywords", g_memories[i].keywords);
         if (g_memories[i].created)
             cJSON_AddStringToObject(entry, "created", g_memories[i].created);
+        cJSON_AddNumberToObject(entry, "timestamp", (double)g_memories[i].timestamp);
         cJSON_AddItemToArray(arr, entry);
     }
 
@@ -81,6 +82,7 @@ static void memory_load_from_disk(void)
         cJSON *j_content = cJSON_GetObjectItem(entry, "content");
         cJSON *j_keywords = cJSON_GetObjectItem(entry, "keywords");
         cJSON *j_created = cJSON_GetObjectItem(entry, "created");
+        cJSON *j_timestamp = cJSON_GetObjectItem(entry, "timestamp");
 
         if (!j_content || !cJSON_IsString(j_content)) continue;
 
@@ -96,6 +98,8 @@ static void memory_load_from_disk(void)
             (j_keywords && cJSON_IsString(j_keywords)) ? strdup(j_keywords->valuestring) : NULL;
         g_memories[g_mem_count].created =
             (j_created && cJSON_IsString(j_created)) ? strdup(j_created->valuestring) : NULL;
+        g_memories[g_mem_count].timestamp =
+            (j_timestamp && cJSON_IsNumber(j_timestamp)) ? (long)j_timestamp->valuedouble : 0;
         g_mem_count++;
 
         if (id >= g_next_id)
@@ -236,6 +240,7 @@ int llm_memory_save(const char *content, const char *keywords)
     g_memories[g_mem_count].content = strdup(content);
     g_memories[g_mem_count].keywords = keywords ? strdup(keywords) : auto_keywords(content);
     g_memories[g_mem_count].created = now_iso();
+    g_memories[g_mem_count].timestamp = (long)time(NULL);
     g_mem_count++;
 
     memory_save_to_disk();

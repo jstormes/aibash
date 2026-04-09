@@ -7,6 +7,7 @@ typedef struct {
     char *content;      /* the fact/preference/note */
     char *keywords;     /* comma-separated keywords */
     char *created;      /* ISO timestamp */
+    long timestamp;     /* Unix epoch seconds (for sorting/conflict resolution) */
 } mem_entry_t;
 
 /*
