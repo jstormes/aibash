@@ -7,6 +7,7 @@
 
 #include "llm_api.h"
 #include "llm_history.h"
+#include "llm_memory.h"
 #include "llm_config.h"
 #include "llm_streams.h"
 #include "cJSON.h"
@@ -42,7 +43,11 @@ static const char *TOOLS_JSON =
 "  {\"type\":\"function\",\"function\":{\"name\":\"head\",\"description\":\"Show first N lines of a file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"lines\":{\"type\":\"integer\"}},\"required\":[\"path\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"wc\",\"description\":\"Count lines/words/chars\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"flags\":{\"type\":\"string\"}},\"required\":[\"path\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"man\",\"description\":\"Get detailed man page for a command (synopsis, options, usage). Use when you need exact flags or options.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Command name to look up\"}},\"required\":[\"command\"]}}},"
-"  {\"type\":\"function\",\"function\":{\"name\":\"run\",\"description\":\"Execute a shell command pipeline. Use for any command not covered by builtins.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"pipeline\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Array of commands to pipe together\"},\"stdin_file\":{\"type\":\"string\"},\"stdout_file\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"pipeline\"]}}}"
+"  {\"type\":\"function\",\"function\":{\"name\":\"run\",\"description\":\"Execute a shell command pipeline. Use for any command not covered by builtins.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"pipeline\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Array of commands to pipe together\"},\"stdin_file\":{\"type\":\"string\"},\"stdout_file\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"pipeline\"]}}},"
+"  {\"type\":\"function\",\"function\":{\"name\":\"memory_save\",\"description\":\"Save a fact, preference, or note to long-term memory. Use when the user tells you something worth remembering for future sessions.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\",\"description\":\"The fact or preference to remember\"},\"keywords\":{\"type\":\"string\",\"description\":\"Comma-separated keywords for search\"}},\"required\":[\"content\"]}}},"
+"  {\"type\":\"function\",\"function\":{\"name\":\"memory_search\",\"description\":\"Search long-term memories for relevant context.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Keywords or topic to search for\"}},\"required\":[\"query\"]}}},"
+"  {\"type\":\"function\",\"function\":{\"name\":\"memory_list\",\"description\":\"List all saved long-term memories.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},"
+"  {\"type\":\"function\",\"function\":{\"name\":\"memory_forget\",\"description\":\"Delete a memory by ID or matching text.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Memory ID to delete\"},\"match\":{\"type\":\"string\",\"description\":\"Text to match for deletion\"}}}}}"
 "]";
 
 static const char *SYSTEM_PROMPT =
@@ -75,7 +80,14 @@ static const char *SYSTEM_PROMPT =
     "Man page support:\n"
     "- One-line command summaries are automatically included with 'run' results.\n"
     "- Use the 'man' tool when you need specific flags, options, or usage details.\n"
-    "- Prefer 'man' over guessing flags -- it returns accurate system documentation.";
+    "- Prefer 'man' over guessing flags -- it returns accurate system documentation.\n\n"
+    "Long-term memory:\n"
+    "- You have access to long-term memory that persists across sessions.\n"
+    "- Use 'memory_save' when the user shares preferences, facts about themselves,\n"
+    "  project details, or anything worth remembering for future conversations.\n"
+    "- Use 'memory_search' when you need context from previous sessions.\n"
+    "- Do not save trivial or transient information (command outputs, temporary paths).\n"
+    "- When the user says 'remember that...' or 'don't forget...', always save it.";
 
 /* ---- Interrupt check ---- */
 
@@ -124,9 +136,10 @@ static void spinner_stop(void)
 /* ---- Shared helpers ---- */
 
 static char *build_system_prompt(const char *cwd, const char *last_output,
-                                  const char *matched_cmds, int first_word_is_cmd)
+                                  const char *matched_cmds, int first_word_is_cmd,
+                                  const char *query)
 {
-    size_t sys_len = strlen(SYSTEM_PROMPT) + strlen(cwd) + 576;
+    size_t sys_len = strlen(SYSTEM_PROMPT) + strlen(cwd) + 576 + 2048;
     if (matched_cmds) sys_len += strlen(matched_cmds) + 256;
 
     time_t now = time(NULL);
@@ -156,6 +169,18 @@ static char *build_system_prompt(const char *cwd, const char *last_output,
     }
 
     (void)last_output;
+
+    /* Inject whispered memories if available */
+    if (query) {
+        char *whisper = llm_memory_whisper(query);
+        if (whisper) {
+            off += snprintf(sys_buf + off, sys_len - off,
+                "\n[memory context from long-term memory]\n%s"
+                "[end memory context]\n", whisper);
+            free(whisper);
+        }
+    }
+
     return sys_buf;
 }
 
@@ -296,7 +321,7 @@ llm_response_t *llm_chat(const char *user_input, const char *cwd,
 {
     (void)user_input;
 
-    char *sys_prompt = build_system_prompt(cwd, last_output, matched_cmds, first_word_is_cmd);
+    char *sys_prompt = build_system_prompt(cwd, last_output, matched_cmds, first_word_is_cmd, user_input);
     char *body = build_request_body(sys_prompt, 0);
     free(sys_prompt);
     if (!body) return NULL;
@@ -521,7 +546,7 @@ llm_response_t *llm_chat_stream(const char *user_input, const char *cwd,
 
     (void)user_input;
 
-    char *sys_prompt = build_system_prompt(cwd, last_output, matched_cmds, first_word_is_cmd);
+    char *sys_prompt = build_system_prompt(cwd, last_output, matched_cmds, first_word_is_cmd, user_input);
     char *body = build_request_body(sys_prompt, 1);
     free(sys_prompt);
     if (!body) return NULL;

@@ -61,6 +61,7 @@ $END
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_memory.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 
@@ -140,6 +141,11 @@ llm_config_builtin (WORD_LIST *list)
             stream_chat_output(streams_label_mode == 2
                 ? "Debug mode: on (labels + API)\n"
                 : "Debug mode: off\n");
+        }
+        else if (strcmp(arg, "--memories") == 0) {
+            printf("Memories: %d entries\n", llm_memory_count());
+            printf("Memory enabled: %s\n", g_servers->memory_enabled ? "yes" : "no");
+            printf("Memory max: %d\n", g_servers->memory_max);
         }
         else {
             builtin_error("unknown option '%s'", arg);

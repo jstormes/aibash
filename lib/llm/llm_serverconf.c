@@ -32,6 +32,8 @@ server_config_t *llm_serverconf_load(void)
     conf->man_enrich = 1;
     conf->man_max_bytes = 4096;
     conf->command_not_found = 0;  /* off by default */
+    conf->memory_enabled = 1;    /* on by default */
+    conf->memory_max = BASH_LLM_MEMORY_MAX;
 
     FILE *f = fopen(path, "r");
     if (f) {
@@ -78,6 +80,10 @@ server_config_t *llm_serverconf_load(void)
                     conf->man_max_bytes = atoi(val);
                 else if (strcmp(key, "command_not_found") == 0)
                     conf->command_not_found = atoi(val);
+                else if (strcmp(key, "memory") == 0)
+                    conf->memory_enabled = atoi(val);
+                else if (strcmp(key, "memory_max") == 0)
+                    conf->memory_max = atoi(val);
                 continue;
             }
 

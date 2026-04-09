@@ -86,6 +86,7 @@ extern int evalstring (char *, const char *, int);
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_memory.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -146,6 +147,15 @@ llm_init_builtin (WORD_LIST *list)
     llm_tools_init();
     llm_router_init(g_servers);
 
+    /* Initialize long-term memory */
+    int mem_count = 0;
+    if (g_servers->memory_enabled) {
+        char memdir[4096];
+        const char *home = getenv("HOME");
+        snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
+        mem_count = llm_memory_init(memdir, g_servers->memory_max);
+    }
+
     /* Set up streaming callbacks -- same as llm builtin's ensure_initialized */
     extern void chat_token_cb(const char *token, void *userdata);
     extern void think_token_cb(const char *token, void *userdata);
@@ -176,8 +186,8 @@ llm_init_builtin (WORD_LIST *list)
     {
         char msg[256];
         snprintf(msg, sizeof(msg),
-                 "LLM initialized: %s (%s), %d man pages indexed\n",
-                 active->name, active->model, man_count);
+                 "LLM initialized: %s (%s), %d man pages, %d memories\n",
+                 active->name, active->model, man_count, mem_count);
         stream_chat_output(msg);
     }
 

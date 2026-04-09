@@ -20,6 +20,8 @@ typedef struct {
     int man_enrich;          /* 0=off, 1=whatis auto (default) */
     int man_max_bytes;       /* max bytes for detail lookups (default: 4096) */
     int command_not_found;   /* 0=off, 1=on (default) -- route unknown commands to LLM */
+    int memory_enabled;      /* 0=off, 1=on (default) -- long-term memory */
+    int memory_max;          /* max memory entries (default: 200) */
 } server_config_t;
 
 /* Load config from ~/.bashllmrc. Falls back to env vars. */

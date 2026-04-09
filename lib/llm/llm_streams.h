@@ -44,4 +44,7 @@ void stream_man_output(const char *text);
 /* Write API debug info (request/response summaries) */
 void stream_api_output(const char *direction, const char *text);
 
+/* Write memory whisper debug info */
+void stream_memory_output(const char *text);
+
 #endif /* BASH_LLM_STREAMS_H */

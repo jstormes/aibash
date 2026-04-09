@@ -66,6 +66,7 @@ $END
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
+#include "../lib/llm/llm_memory.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -132,6 +133,14 @@ static int ensure_initialized(void)
     llm_tools_init();
     llm_router_init(g_servers);
 
+    /* Initialize long-term memory */
+    if (g_servers->memory_enabled) {
+        char memdir[4096];
+        const char *home = getenv("HOME");
+        snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
+        llm_memory_init(memdir, g_servers->memory_max);
+    }
+
     /* Set up streaming callbacks */
     g_stream_cbs.on_token = chat_token_cb;
     g_stream_cbs.on_thinking = think_token_cb;
@@ -184,6 +193,59 @@ llm_builtin (WORD_LIST *list)
     if (!list) {
         builtin_usage();
         return (EX_USAGE);
+    }
+
+    /* Check for memory subcommands */
+    if (list && list->word->word) {
+        const char *cmd = list->word->word;
+
+        if (strcmp(cmd, "remember") == 0) {
+            list = list->next;
+            if (!list) {
+                builtin_error("remember requires text");
+                return (EXECUTION_FAILURE);
+            }
+            char *text = string_list(list);
+            if (llm_memory_save(text, NULL) == 0)
+                printf("Remembered: %s\n", text);
+            else
+                builtin_error("failed to save memory");
+            free(text);
+            return (EXECUTION_SUCCESS);
+        }
+
+        if (strcmp(cmd, "forget") == 0) {
+            list = list->next;
+            if (!list) {
+                builtin_error("forget requires an ID or text");
+                return (EXECUTION_FAILURE);
+            }
+            const char *arg = list->word->word;
+            /* Try as numeric ID first */
+            char *endp;
+            long id = strtol(arg, &endp, 10);
+            if (*endp == '\0' && endp != arg) {
+                if (llm_memory_forget((int)id) == 0)
+                    printf("Forgot memory #%ld\n", id);
+                else
+                    builtin_error("memory #%ld not found", id);
+            } else {
+                char *text = string_list(list);
+                if (llm_memory_forget_match(text) == 0)
+                    printf("Forgot matching memories\n");
+                else
+                    builtin_error("no matching memories found");
+                free(text);
+            }
+            return (EXECUTION_SUCCESS);
+        }
+
+        if (strcmp(cmd, "memories") == 0) {
+            char *list_text = llm_memory_list();
+            printf("%s", list_text);
+            free(list_text);
+            return (EXECUTION_SUCCESS);
+        }
     }
 
     /* Concatenate arguments into query string */

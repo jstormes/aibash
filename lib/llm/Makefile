@@ -30,11 +30,11 @@ CCFLAGS = $(DEFS) $(LOCAL_CFLAGS) $(CPPFLAGS) $(CFLAGS) $(INCLUDES)
 
 SOURCES = llm_api.c llm_history.c llm_router.c llm_tools.c llm_exec.c \
           llm_streams.c llm_safety.c llm_serverconf.c llm_manscan.c \
-          llm_shell.c llm_json_helpers.c cJSON.c
+          llm_shell.c llm_json_helpers.c llm_memory.c cJSON.c
 
 OBJECTS = llm_api.o llm_history.o llm_router.o llm_tools.o llm_exec.o \
           llm_streams.o llm_safety.o llm_serverconf.o llm_manscan.o \
-          llm_shell.o llm_json_helpers.o cJSON.o
+          llm_shell.o llm_json_helpers.o llm_memory.o cJSON.o
 
 LIBRARY = libllm.a
 

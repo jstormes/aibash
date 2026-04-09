@@ -13,6 +13,7 @@ static int chat_sol = 1;
 static int tool_sol = 1;
 static int think_sol = 1;
 static int man_sol = 1;
+static int mem_sol = 1;
 
 void llm_streams_init(void)
 {
@@ -90,4 +91,10 @@ void stream_api_output(const char *direction, const char *text)
     if (streams_label_mode < 2 || !text) return;
     fprintf(stderr, "\033[90m[api%s]\033[0m %s\n", direction, text);
     fflush(stderr);
+}
+
+void stream_memory_output(const char *text)
+{
+    if (!text || !streams_label_mode) return;
+    labeled_write(stderr, "mem", "\033[95m", text, &mem_sol);
 }
