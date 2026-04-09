@@ -344,20 +344,44 @@ The main LLM agent can also manage memories during the agentic loop:
 - **`memory_forget`** -- Delete memories by ID (uses search→forget workflow)
 - **`memory_list`** -- List all saved memories
 
-### Whisper Injection
+### Whisper Injection (Three Layers)
 
-Before each query, relevant memories are automatically injected into the
-system prompt as a `[memory context]` block. In label/debug mode, you can
-see what was whispered and what the memory agent extracted:
+Before each query, relevant memories are injected into the system prompt.
+The whisper system has three layers:
+
+**Layer 1 -- Keyword search (<1ms):** Fast `strcasestr` matching against
+memory content and keywords. Handles most queries instantly.
+
+**Layer 2 -- Parallel whisper agents (2-5s, fallback):** When keyword
+search finds nothing, two LLM-powered agents fork in parallel and
+semantically search all memories for relevant context:
+- Agent 1 searches for user preferences and personal context
+- Agent 2 searches for project and technical context
+
+Both call the memory agent LLM simultaneously. Results are merged with
+a 5-second timeout -- if agents don't respond in time, the query
+proceeds without whispered context.
+
+**Layer 3 -- Background extraction (post-response):** After each
+conversation, a background process extracts new facts (see Memory Agent
+section above).
+
+In label/debug mode, you can see which layer was used:
 
 ```
 $ llm_config --labels
 Labels: on
-$ llm help me with the database
-[mem] - this project uses PostgreSQL 16
-[mem] - User prefers Python for scripting
-[mem-agent] extracted: User is working on database tasks
-...
+
+$ llm what database do I use
+[mem] - The main project database is PostgreSQL 16     ← Layer 1: keyword hit
+
+$ llm describe my infrastructure setup
+[mem-whisper] searching (2 agents)...                  ← Layer 2: fallback
+[mem-whisper] - User deploys to AWS us-east-1
+[mem-whisper] - The main project database is PostgreSQL 16
+[mem-whisper] - The CI pipeline uses GitHub Actions
+
+[mem-agent] extracted: User asked about infrastructure  ← Layer 3: background
 ```
 
 ### Configuration
@@ -376,7 +400,11 @@ model = Qwen3.5-4B
 The memory agent is active when `memory = 1` AND a `[memory]` section
 with a `url` is present. Without the `[memory]` section, explicit
 commands (`llm remember`, `llm forget`) and the main agent's memory
-tools still work -- only automatic background extraction is disabled.
+tools still work -- only automatic extraction and whisper agents are
+disabled.
+
+For details on setting up the memory agent server, model selection,
+and tuning, see [doc/MEMORY.md](doc/MEMORY.md).
 
 ### Storage
 
