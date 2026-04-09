@@ -33,7 +33,7 @@ server_config_t *llm_serverconf_load(void)
     conf->man_max_bytes = 4096;
     conf->command_not_found = 0;  /* off by default */
     conf->memory_enabled = 1;    /* on by default */
-    conf->memory_max = BASH_LLM_MEMORY_MAX;
+    conf->memory_max = BASH_LLM_MEMORY_MAX;  /* 1500 default, fits 262K context */
 
     FILE *f = fopen(path, "r");
     if (f) {
