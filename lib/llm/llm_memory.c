@@ -325,10 +325,27 @@ int llm_memory_save(const char *content, const char *keywords)
     return 0;
 }
 
+/*
+ * Save a tombstone marker so background cleanup processes know
+ * this fact was intentionally deleted. The cleanup pass (thinking ON)
+ * will see the tombstone, remove any conflicting re-saved memories,
+ * and remove the tombstone itself.
+ */
+static void save_tombstone(const char *deleted_content)
+{
+    if (!deleted_content) return;
+    char tomb[1024];
+    snprintf(tomb, sizeof(tomb), "DELETED: User wants to forget: %s", deleted_content);
+    llm_memory_save(tomb, "deleted,tombstone,forget");
+}
+
 int llm_memory_forget(int id)
 {
     for (int i = 0; i < g_mem_count; i++) {
         if (g_memories[i].id == id) {
+            /* Save content before deleting for tombstone */
+            char *old_content = strdup(g_memories[i].content);
+
             free(g_memories[i].content);
             free(g_memories[i].keywords);
             free(g_memories[i].created);
@@ -336,6 +353,11 @@ int llm_memory_forget(int id)
                     (g_mem_count - i - 1) * sizeof(mem_entry_t));
             g_mem_count--;
             memory_save_to_disk();
+
+            /* Leave tombstone for background cleanup to find */
+            if (old_content && strncmp(old_content, "DELETED:", 8) != 0)
+                save_tombstone(old_content);
+            free(old_content);
             return 0;
         }
     }
@@ -346,9 +368,15 @@ int llm_memory_forget_match(const char *text)
 {
     if (!text) return -1;
     int removed = 0;
+    char *first_deleted = NULL;
 
     for (int i = g_mem_count - 1; i >= 0; i--) {
-        if (strcasestr(g_memories[i].content, text)) {
+        if (strcasestr(g_memories[i].content, text)
+            && strncmp(g_memories[i].content, "DELETED:", 8) != 0) {
+            /* Capture first deleted content for tombstone */
+            if (!first_deleted)
+                first_deleted = strdup(g_memories[i].content);
+
             free(g_memories[i].content);
             free(g_memories[i].keywords);
             free(g_memories[i].created);
@@ -359,7 +387,13 @@ int llm_memory_forget_match(const char *text)
         }
     }
 
-    if (removed > 0) memory_save_to_disk();
+    if (removed > 0) {
+        memory_save_to_disk();
+        /* Leave tombstone */
+        if (first_deleted)
+            save_tombstone(first_deleted);
+    }
+    free(first_deleted);
     return removed > 0 ? 0 : -1;
 }
 
@@ -374,6 +408,9 @@ char *llm_memory_search(const char *query)
     int nscored = 0;
 
     for (int i = 0; i < g_mem_count; i++) {
+        /* Skip tombstones in search results */
+        if (strncmp(g_memories[i].content, "DELETED:", 8) == 0)
+            continue;
         int s = match_score(&g_memories[i], query);
         if (s > 0) {
             scored[nscored].idx = i;
@@ -428,6 +465,9 @@ char *llm_memory_list(void)
     size_t blen = 0, bcap = 0;
 
     for (int i = 0; i < g_mem_count; i++) {
+        /* Hide tombstones from user-facing list */
+        if (strncmp(g_memories[i].content, "DELETED:", 8) == 0)
+            continue;
         char line[1024];
         snprintf(line, sizeof(line), "[%d] %s\n",
                  g_memories[i].id, g_memories[i].content);
@@ -460,6 +500,9 @@ char *llm_memory_whisper(const char *query)
     int nscored = 0;
 
     for (int i = 0; i < g_mem_count; i++) {
+        /* Skip tombstones -- don't whisper deletion markers */
+        if (strncmp(g_memories[i].content, "DELETED:", 8) == 0)
+            continue;
         int s = match_score(&g_memories[i], query);
         if (s > 0) {
             scored[nscored].idx = i;

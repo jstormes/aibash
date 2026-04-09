@@ -167,6 +167,26 @@ $ llm actually I switched to helix
 #   - Saves "User uses helix as editor"
 ```
 
+### Tombstone Mechanism
+
+When a memory is deleted, a tombstone marker is saved:
+
+```
+DELETED: User wants to forget: I use helix as my editor
+```
+
+Tombstones solve a race condition: the background memory agent runs
+in a forked process and may re-save a fact that the user already
+deleted. When the cleanup pass (thinking ON) runs, it sees the
+tombstone, removes any conflicting re-saved memories, and removes
+the tombstone itself.
+
+Tombstones are:
+- **Hidden** from `llm memories` and `memory_list`
+- **Excluded** from whisper injection and `memory_search`
+- **Visible** to the cleanup pass for conflict resolution
+- **Self-cleaning** -- the cleanup pass removes them after resolving
+
 ## Whisper Layers in Detail
 
 ### Layer 1: Keyword Search with Stemming
