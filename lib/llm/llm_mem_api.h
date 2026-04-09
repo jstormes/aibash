@@ -12,8 +12,10 @@ void llm_mem_api_cleanup(void);
 
 /*
  * Send a system+user message to the memory agent LLM (blocking).
+ * enable_thinking: 0 = fast direct output, 1 = allow reasoning chain
  * Returns malloced response text, or NULL on error.
  */
-char *llm_mem_api_chat(const char *system_prompt, const char *user_message);
+char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
+                       int enable_thinking);
 
 #endif /* BASH_LLM_MEM_API_H */

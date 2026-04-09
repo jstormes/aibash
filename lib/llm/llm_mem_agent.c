@@ -10,38 +10,50 @@
 
 static int g_agent_ready = 0;
 
-static const char *EXTRACT_SYSTEM_PROMPT =
+/* ---- Pass 1: Fast extraction (thinking OFF) ---- */
+
+static const char *EXTRACT_PROMPT =
     "You are a memory extraction agent. Analyze the conversation and extract "
     "facts worth remembering. Output ONLY a valid JSON array.\n\n"
     "RULES:\n"
-    "1. Split multiple facts into SEPARATE entries (one fact per object)\n"
-    "2. Use third person: \"User prefers...\" not \"I prefer...\"\n"
-    "3. If a fact contradicts an existing memory, use \"replaces\" with the memory ID\n"
-    "4. If the user asks to forget something, use \"forget\" with the memory ID\n"
-    "5. If nothing worth saving, return: []\n"
-    "6. Output RAW JSON only. No markdown, no code fences, no explanation.\n\n"
-    "ENTRY FORMAT:\n"
-    "  {\"content\": \"...\", \"keywords\": \"comma,separated\"}\n"
-    "  {\"content\": \"...\", \"keywords\": \"...\", \"replaces\": 2}\n"
-    "  {\"forget\": 5}\n\n"
-    "EXAMPLE - Given existing memories:\n"
+    "1. Use third person: \"User prefers...\" not \"I prefer...\"\n"
+    "2. If nothing worth saving, return: []\n"
+    "3. Output RAW JSON only. No markdown, no code fences, no explanation.\n"
+    "4. If the user asks to forget something, use {\"forget\": ID}\n\n"
+    "FORMAT: [{\"content\": \"...\", \"keywords\": \"comma,separated\"}]\n\n"
+    "DO NOT save: command outputs, file contents, directory listings, errors.\n"
+    "DO save: name, role, preferences, habits, project details, tech choices.";
+
+/* ---- Pass 2: Cleanup (thinking ON) ---- */
+
+static const char *CLEANUP_PROMPT =
+    "You are a memory cleanup agent. Review the current memories and fix "
+    "any issues. Output ONLY a valid JSON array of operations.\n\n"
+    "TASKS:\n"
+    "1. SPLIT compound entries into individual facts\n"
+    "2. REPLACE outdated memories when newer info exists\n"
+    "3. REMOVE duplicates\n\n"
+    "OPERATIONS:\n"
+    "  {\"add\": \"new fact text\", \"keywords\": \"...\"}\n"
+    "  {\"forget\": ID}\n\n"
+    "To split a compound memory [5] into parts: forget 5, then add each part.\n"
+    "To replace outdated [3] with new info: forget 3, then add the correction.\n"
+    "If memories are clean and consistent, return: []\n\n"
+    "EXAMPLE - Given memories:\n"
     "  [1] User's name is James\n"
-    "  [2] User prefers Python for scripting\n"
-    "  [3] User uses vim as editor\n\n"
-    "Conversation: \"I switched to Rust for scripting and started using helix\"\n\n"
+    "  [2] User prefers Python, uses neovim, and deploys to AWS\n"
+    "  [3] User switched from neovim to helix editor\n\n"
     "Output:\n"
     "[\n"
-    "  {\"content\": \"User prefers Rust for scripting\", \"keywords\": \"rust,scripting,language\", \"replaces\": 2},\n"
-    "  {\"content\": \"User uses helix as editor\", \"keywords\": \"helix,editor\", \"replaces\": 3}\n"
+    "  {\"forget\": 2},\n"
+    "  {\"forget\": 3},\n"
+    "  {\"add\": \"User prefers Python for scripting\", \"keywords\": \"python,scripting\"},\n"
+    "  {\"add\": \"User uses helix as editor\", \"keywords\": \"helix,editor\"},\n"
+    "  {\"add\": \"User deploys to AWS\", \"keywords\": \"aws,deploy,cloud\"}\n"
     "]\n\n"
-    "EXAMPLE - User says \"forget that I use vim\":\n"
-    "[\n"
-    "  {\"forget\": 3}\n"
-    "]\n\n"
-    "DO NOT save: command outputs, file contents, directory listings, errors, "
-    "or things already in existing memories.\n\n"
-    "DO save: name, role, preferences, habits, project details, tech choices, "
-    "corrections to existing facts.";
+    "Output RAW JSON only. No markdown, no code fences, no explanation.";
+
+/* ---- Init/cleanup ---- */
 
 int llm_mem_agent_init(const char *api_url, const char *model, const char *api_key)
 {
@@ -62,27 +74,27 @@ int llm_mem_agent_ready(void)
     return g_agent_ready;
 }
 
-/*
- * Build the user message containing existing memories + conversation.
- */
-static char *build_extraction_prompt(const char *conversation)
-{
-    /* Get current memories for context */
-    char *mem_list = llm_memory_list();
+/* ---- Helpers ---- */
 
-    size_t len = strlen(conversation) + (mem_list ? strlen(mem_list) : 0) + 256;
+static char *build_prompt_with_memories(const char *prefix, const char *body)
+{
+    char *mem_list = llm_memory_list();
+    int has_memories = mem_list && strcmp(mem_list, "(no memories saved)") != 0;
+
+    size_t len = (prefix ? strlen(prefix) : 0)
+               + (body ? strlen(body) : 0)
+               + (has_memories ? strlen(mem_list) : 0) + 256;
     char *prompt = malloc(len);
 
-    if (mem_list && strcmp(mem_list, "(no memories saved)") != 0) {
-        snprintf(prompt, len,
-                 "Existing memories:\n%s\n"
-                 "Conversation:\n%s",
-                 mem_list, conversation);
+    if (has_memories) {
+        snprintf(prompt, len, "Existing memories:\n%s\n%s%s",
+                 mem_list,
+                 prefix ? prefix : "",
+                 body ? body : "");
     } else {
-        snprintf(prompt, len,
-                 "Existing memories: (none)\n\n"
-                 "Conversation:\n%s",
-                 conversation);
+        snprintf(prompt, len, "Existing memories: (none)\n\n%s%s",
+                 prefix ? prefix : "",
+                 body ? body : "");
     }
 
     free(mem_list);
@@ -90,62 +102,78 @@ static char *build_extraction_prompt(const char *conversation)
 }
 
 /*
- * Parse the JSON response and apply memory operations.
- * Handles: save (content+keywords), replaces (delete old + save new), forget (delete).
+ * Parse JSON response and apply operations.
+ * Supports: {content, keywords}, {content, keywords, replaces}, {forget}, {add, keywords}
  */
-static void apply_extractions(const char *json_text)
+static int apply_operations(const char *json_text)
 {
-    if (!json_text || !json_text[0]) return;
+    if (!json_text || !json_text[0]) return 0;
 
-    /* Find the JSON array -- skip any leading text/whitespace */
+    /* Find the JSON array -- skip any leading text */
     const char *start = json_text;
     while (*start && *start != '[') start++;
-    if (!*start) return;
+    if (!*start) return 0;
 
     cJSON *arr = cJSON_Parse(start);
     if (!arr || !cJSON_IsArray(arr)) {
         cJSON_Delete(arr);
-        return;
+        return 0;
     }
 
     int n = cJSON_GetArraySize(arr);
+    int ops = 0;
+
     for (int i = 0; i < n; i++) {
         cJSON *item = cJSON_GetArrayItem(arr, i);
         if (!item) continue;
 
-        /* Handle forget requests */
+        /* Handle forget */
         cJSON *j_forget = cJSON_GetObjectItem(item, "forget");
         if (j_forget && cJSON_IsNumber(j_forget)) {
-            int id = j_forget->valueint;
-            llm_memory_forget(id);
-            stream_mem_agent_output("forgot memory");
+            llm_memory_forget(j_forget->valueint);
+            ops++;
             continue;
         }
 
-        cJSON *j_content = cJSON_GetObjectItem(item, "content");
-        if (!j_content || !cJSON_IsString(j_content)) continue;
+        /* Handle add (from cleanup pass) */
+        cJSON *j_add = cJSON_GetObjectItem(item, "add");
+        if (j_add && cJSON_IsString(j_add)) {
+            cJSON *j_kw = cJSON_GetObjectItem(item, "keywords");
+            const char *kw = (j_kw && cJSON_IsString(j_kw)) ? j_kw->valuestring : NULL;
+            llm_memory_save(j_add->valuestring, kw);
+            ops++;
 
-        /* Handle replacements -- delete old memory first */
-        cJSON *j_replaces = cJSON_GetObjectItem(item, "replaces");
-        if (j_replaces && cJSON_IsNumber(j_replaces)) {
-            llm_memory_forget(j_replaces->valueint);
+            char dbg[512];
+            snprintf(dbg, sizeof(dbg), "cleanup: %s\n", j_add->valuestring);
+            stream_mem_agent_output(dbg);
+            continue;
         }
 
-        /* Save new memory */
-        cJSON *j_keywords = cJSON_GetObjectItem(item, "keywords");
-        const char *kw = (j_keywords && cJSON_IsString(j_keywords))
-                         ? j_keywords->valuestring : NULL;
+        /* Handle content (from extraction pass) */
+        cJSON *j_content = cJSON_GetObjectItem(item, "content");
+        if (j_content && cJSON_IsString(j_content)) {
+            /* Handle replaces */
+            cJSON *j_replaces = cJSON_GetObjectItem(item, "replaces");
+            if (j_replaces && cJSON_IsNumber(j_replaces))
+                llm_memory_forget(j_replaces->valueint);
 
-        llm_memory_save(j_content->valuestring, kw);
+            cJSON *j_kw = cJSON_GetObjectItem(item, "keywords");
+            const char *kw = (j_kw && cJSON_IsString(j_kw)) ? j_kw->valuestring : NULL;
+            llm_memory_save(j_content->valuestring, kw);
+            ops++;
 
-        /* Debug output */
-        char dbg[512];
-        snprintf(dbg, sizeof(dbg), "extracted: %s\n", j_content->valuestring);
-        stream_mem_agent_output(dbg);
+            char dbg[512];
+            snprintf(dbg, sizeof(dbg), "extracted: %s\n", j_content->valuestring);
+            stream_mem_agent_output(dbg);
+            continue;
+        }
     }
 
     cJSON_Delete(arr);
+    return ops;
 }
+
+/* ---- Main extraction entry point ---- */
 
 void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int memory_max)
 {
@@ -157,16 +185,42 @@ void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int
      */
     llm_memory_init(memory_dir, memory_max);
 
-    /* Build the prompt with existing memories + conversation */
-    char *prompt = build_extraction_prompt(conversation);
+    /*
+     * PASS 1: Fast extraction (thinking OFF)
+     * Quick scan of the conversation, extract obvious facts.
+     */
+    {
+        char *prompt = build_prompt_with_memories("Conversation:\n", conversation);
+        char *response = llm_mem_api_chat(EXTRACT_PROMPT, prompt, 0);
+        free(prompt);
 
-    /* Call memory agent LLM */
-    char *response = llm_mem_api_chat(EXTRACT_SYSTEM_PROMPT, prompt);
-    free(prompt);
+        if (response) {
+            apply_operations(response);
+            free(response);
+        }
+    }
 
-    if (!response) return;
+    /*
+     * PASS 2: Cleanup (thinking ON)
+     * Reload memories (pass 1 may have added new ones), then ask the
+     * model to split compound entries, resolve conflicts, remove dupes.
+     * Thinking mode lets it reason through the logic step by step.
+     */
+    {
+        /* Reload from disk to see pass 1 results */
+        llm_memory_cleanup();
+        llm_memory_init(memory_dir, memory_max);
 
-    /* Parse and apply extractions */
-    apply_extractions(response);
-    free(response);
+        /* Only run cleanup if there are memories to clean */
+        if (llm_memory_count() > 1) {
+            char *prompt = build_prompt_with_memories(NULL, NULL);
+            char *response = llm_mem_api_chat(CLEANUP_PROMPT, prompt, 1);
+            free(prompt);
+
+            if (response) {
+                apply_operations(response);
+                free(response);
+            }
+        }
+    }
 }

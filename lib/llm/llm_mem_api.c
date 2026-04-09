@@ -48,7 +48,8 @@ static size_t mem_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
     return total;
 }
 
-char *llm_mem_api_chat(const char *system_prompt, const char *user_message)
+char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
+                       int enable_thinking)
 {
     if (!g_mem_api_url || !g_mem_model) return NULL;
 
@@ -72,10 +73,15 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message)
     cJSON_AddNumberToObject(req, "max_tokens", 1024);
     cJSON_AddNumberToObject(req, "temperature", 0.1);
 
-    /* Disable thinking mode for Qwen3.5 models -- we want fast, direct output */
+    /* Control thinking mode for Qwen3.5 models */
     cJSON *kwargs = cJSON_CreateObject();
-    cJSON_AddBoolToObject(kwargs, "enable_thinking", 0);
+    cJSON_AddBoolToObject(kwargs, "enable_thinking", enable_thinking ? 1 : 0);
     cJSON_AddItemToObject(req, "chat_template_kwargs", kwargs);
+
+    /* More tokens needed when thinking is enabled */
+    if (enable_thinking)
+        cJSON_ReplaceItemInObject(req, "max_tokens",
+            cJSON_CreateNumber(4096));
 
     char *body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
