@@ -218,6 +218,26 @@ static int stem_match(const char *text, const char *stemmed_query_word)
     return 0;
 }
 
+/* Common English stop words to skip in keyword matching */
+static int is_stop_word(const char *word)
+{
+    static const char *stops[] = {
+        "a", "an", "the", "is", "am", "are", "was", "were", "be",
+        "my", "me", "i", "you", "your", "we", "our", "they", "their",
+        "it", "its", "he", "she", "his", "her", "him",
+        "do", "does", "did", "has", "have", "had",
+        "in", "on", "at", "to", "of", "for", "with", "by", "from",
+        "and", "or", "but", "not", "no", "so", "if", "then",
+        "this", "that", "what", "which", "who", "how", "when", "where",
+        "can", "will", "would", "should", "could",
+        "about", "describe", "show", "tell", "list", "give",
+        NULL
+    };
+    for (int i = 0; stops[i]; i++)
+        if (strcasecmp(word, stops[i]) == 0) return 1;
+    return 0;
+}
+
 /*
  * Score how well a memory matches a query.
  * Uses both exact substring match and stemmed match.
@@ -232,7 +252,7 @@ static int match_score(const mem_entry_t *mem, const char *query)
     char *saveptr = NULL;
     char *word = strtok_r(qcopy, " \t,", &saveptr);
     while (word) {
-        if (strlen(word) >= 2) {
+        if (strlen(word) >= 2 && !is_stop_word(word)) {
             /* Exact substring match (strongest signal) */
             if (mem->content && strcasestr(mem->content, word))
                 score += 2;
