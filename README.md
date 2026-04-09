@@ -349,8 +349,10 @@ The main LLM agent can also manage memories during the agentic loop:
 Before each query, relevant memories are injected into the system prompt.
 The whisper system has three layers:
 
-**Layer 1 -- Keyword search (<1ms):** Fast `strcasestr` matching against
-memory content and keywords. Handles most queries instantly.
+**Layer 1 -- Keyword search with stemming (<1ms):** Fast substring
+matching plus lightweight English stemming. "deployment" matches
+"deploy", "containers" matches "container", etc. Handles most queries
+instantly including word form variations.
 
 **Layer 2 -- Parallel whisper agents (2-5s, fallback):** When keyword
 search finds nothing, two LLM-powered agents fork in parallel and

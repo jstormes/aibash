@@ -169,15 +169,33 @@ $ llm actually I switched to helix
 
 ## Whisper Layers in Detail
 
-### Layer 1: Keyword Search
+### Layer 1: Keyword Search with Stemming
 
 - **Speed:** <1ms
-- **Method:** `strcasestr()` substring match against memory content and keywords
+- **Method:** Exact substring match + lightweight English stemming
 - **When:** Every query
 - **Returns:** Top 10 matching memories (max ~2000 chars)
 
-This handles most queries where the user mentions specific keywords
-that overlap with stored memories.
+The search uses two matching strategies with weighted scoring:
+
+**Exact match (2 points):** Case-insensitive substring search via
+`strcasestr()`. "deploy" in query matches "I deploy to AWS".
+
+**Stemmed match (1 point):** Strips common English suffixes to match
+morphological variants. Only applied to words >= 5 characters.
+
+Suffixes stripped: `-ation`, `-ment`, `-ness`, `-able`, `-ible`, `-ing`,
+`-tion`, `-sion`, `-ous`, `-ive`, `-ize`, `-ful`, `-less`, `-ed`,
+`-er`, `-ly`, `-al`, `-es`, `-s`
+
+Examples:
+- "deployment" → "deploy" matches "I deploy to AWS"
+- "containers" → "contain" matches "uses Docker for containers"
+- "databases" → "databas" matches "project database is MySQL"
+- "scripting" → "script" matches "prefer Python for scripts"
+
+This handles most queries including word form variations without
+needing to call the LLM.
 
 ### Layer 2: Parallel Whisper Agents
 
