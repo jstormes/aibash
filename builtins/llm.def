@@ -23,22 +23,27 @@ $PRODUCES llm.c
 $BUILTIN llm
 $DEPENDS_ON HAVE_LLM
 $FUNCTION llm_builtin
-$SHORT_DOC llm [-c] [query ...]
+$SHORT_DOC llm [-c] [query ...] | remember <text> | forget <id|text> | memories
 Send a query to an LLM and run the agentic tool loop.
 
 Options:
   -c	clear conversation history
 
+Subcommands:
+  remember <text>   save a fact to long-term memory
+  forget <id>       delete a memory by ID
+  forget <text>     delete memories matching text
+  memories          list all saved memories
+
 Concatenates arguments into a query and sends it to the configured
-LLM server. The LLM can call tools (ls, cat, grep, run, man, etc.)
-and will iterate until it produces a final text answer or the max
-iterations limit is reached.
+LLM server. The LLM can call tools (ls, cat, grep, run, man,
+memory_save, memory_search, etc.) and will iterate until it produces
+a final text answer or the max iterations limit is reached.
+
+Relevant long-term memories are automatically whispered into the
+system prompt before each query.
 
 LLM responses stream to stdout. Tool status goes to stderr.
-
-The LLM subsystem auto-initializes on first use if llm_init has
-not been called. In interactive shells, llm_init runs automatically
-at startup.
 
 Configuration is read from ~/.bashllmrc (INI format). See llm_init
 and llm_config for details.

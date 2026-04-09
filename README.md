@@ -119,6 +119,8 @@ All configuration lives in `~/.bashllmrc` (INI format):
 max_iterations = 20       # max tool-call rounds per query (default: 20)
 man_enrich = 1            # auto-inject man summaries with commands (default: 1)
 command_not_found = 0     # route unknown commands to LLM (default: 0)
+memory = 1                # enable long-term memory (default: 1)
+memory_max = 200          # max memory entries (default: 200)
 
 [local]
 url = http://localhost:8080/v1/chat/completions
@@ -152,8 +154,23 @@ llm -c                        # clear conversation history
 llm find all .c files over 10k
 ```
 
-The LLM can call tools (ls, cat, grep, run, man, etc.) and will iterate
-until it produces a final text answer or the max iterations limit is reached.
+The LLM can call tools (ls, cat, grep, run, man, memory, etc.) and will
+iterate until it produces a final text answer or the max iterations limit
+is reached.
+
+**Memory subcommands:**
+
+```bash
+llm remember I prefer Python over Node    # save a fact to long-term memory
+llm remember this project uses PostgreSQL  # save project context
+llm memories                               # list all saved memories
+llm forget 3                               # delete memory by ID
+llm forget Python                          # delete by content match
+```
+
+These commands manage memory directly without calling the LLM. The LLM
+can also use memory tools (`memory_save`, `memory_search`, `memory_forget`)
+during the agentic loop.
 
 ### `llm_init [-n]`
 
@@ -179,8 +196,9 @@ llm_config                    # show current config
 llm_config --list             # list all servers (* marks active)
 llm_config --switch openai    # switch to a different server
 llm_config --verbose          # toggle tool output visibility
-llm_config --labels           # toggle [chat]/[stdout]/[tool] labels
+llm_config --labels           # toggle [chat]/[stdout]/[tool]/[mem] labels
 llm_config --debug            # toggle debug mode (labels + API info)
+llm_config --memories         # show memory stats
 ```
 
 ### Shift-Tab
@@ -219,6 +237,10 @@ User query
 | write_file | Confirm | Write content to file |
 | rm | Danger | Remove files |
 | run | Auto/Confirm | Execute arbitrary pipeline |
+| memory_save | Auto | Save a fact/preference to long-term memory |
+| memory_search | Auto | Search memories by keyword |
+| memory_list | Auto | List all saved memories |
+| memory_forget | Auto | Delete a memory by ID or content |
 
 ### Safety Tiers
 
@@ -237,6 +259,82 @@ On startup, aibash indexes all man page summaries (~3000 entries) from the
 one-line man summaries are automatically injected into the results, giving
 the LLM accurate knowledge of available commands. The LLM can also call
 the `man` tool for detailed flag and option documentation.
+
+## Long-Term Memory
+
+aibash includes a persistent long-term memory system that lets the LLM
+remember facts, preferences, and project context across sessions.
+
+### How It Works
+
+Memories are stored as JSON in `~/.aibash_memories/memories.json`. Before
+each query, aibash searches memories for keywords matching your input and
+"whispers" relevant context into the LLM's system prompt. The LLM sees
+this context but the user doesn't (unless debug/label mode is on).
+
+```
+$ llm remember my name is Bob
+Remembered: my name is Bob
+
+$ llm remember I prefer Python for scripting
+Remembered: I prefer Python for scripting
+
+# Later, even in a new session:
+$ llm what is my name
+Bob
+
+$ llm write me a script to parse CSV files
+# → LLM knows to use Python because of whispered memory
+```
+
+### Memory Commands
+
+| Command | Description |
+|---------|-------------|
+| `llm remember <text>` | Save a fact directly (no LLM call) |
+| `llm memories` | List all saved memories with IDs |
+| `llm forget <id>` | Delete a memory by ID |
+| `llm forget <text>` | Delete memories matching text |
+| `llm_config --memories` | Show memory stats |
+
+### LLM Memory Tools
+
+The LLM can also manage memories during the agentic loop:
+
+- **`memory_save`** -- The LLM proactively saves facts when the user shares
+  preferences or important context (e.g., "I always deploy to AWS")
+- **`memory_search`** -- The LLM searches memories when it needs context
+  from previous sessions
+- **`memory_forget`** -- The LLM can remove outdated memories
+
+### Whisper Injection
+
+Before each query, relevant memories are automatically injected into the
+system prompt as a `[memory context]` block. In label/debug mode, you can
+see what was whispered:
+
+```
+$ llm_config --labels
+Labels: on
+$ llm help me with the database
+[mem] - this project uses PostgreSQL 16
+[mem] - User prefers Python for scripting
+...
+```
+
+### Configuration
+
+```ini
+[settings]
+memory = 1          # 0=off, 1=on (default: 1)
+memory_max = 200    # max entries before oldest are evicted (default: 200)
+```
+
+### Storage
+
+Memories are stored in `~/.aibash_memories/memories.json` as a JSON array.
+Each entry has an ID, content, auto-generated keywords, and a timestamp.
+The rolling window evicts the oldest entries when `memory_max` is reached.
 
 ## Recommended Models
 
