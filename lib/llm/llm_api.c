@@ -47,7 +47,7 @@ static const char *TOOLS_JSON =
 "  {\"type\":\"function\",\"function\":{\"name\":\"memory_save\",\"description\":\"Save a fact, preference, or note to long-term memory. Use when the user tells you something worth remembering for future sessions.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\",\"description\":\"The fact or preference to remember\"},\"keywords\":{\"type\":\"string\",\"description\":\"Comma-separated keywords for search\"}},\"required\":[\"content\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"memory_search\",\"description\":\"Search long-term memories for relevant context.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Keywords or topic to search for\"}},\"required\":[\"query\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"memory_list\",\"description\":\"List all saved long-term memories.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},"
-"  {\"type\":\"function\",\"function\":{\"name\":\"memory_forget\",\"description\":\"Delete a memory by ID or matching text.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Memory ID to delete\"},\"match\":{\"type\":\"string\",\"description\":\"Text to match for deletion\"}}}}}"
+"  {\"type\":\"function\",\"function\":{\"name\":\"memory_forget\",\"description\":\"Delete a memory. Use 'id' to delete by ID (get IDs from memory_search or memory_list first). Use 'match' to delete by text substring.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Memory ID to delete\"},\"match\":{\"type\":\"string\",\"description\":\"Text to match for deletion\"}}}}}"
 "]";
 
 static const char *SYSTEM_PROMPT =
@@ -86,8 +86,12 @@ static const char *SYSTEM_PROMPT =
     "- Use 'memory_save' when the user shares preferences, facts about themselves,\n"
     "  project details, or anything worth remembering for future conversations.\n"
     "- Use 'memory_search' when you need context from previous sessions.\n"
+    "- Use 'memory_forget' to delete memories. When the user asks you to forget\n"
+    "  something, FIRST use 'memory_search' to find matching memories, note their\n"
+    "  IDs from the [ID] prefix, then call 'memory_forget' with the ID for each.\n"
     "- Do not save trivial or transient information (command outputs, temporary paths).\n"
-    "- When the user says 'remember that...' or 'don't forget...', always save it.";
+    "- When the user says 'remember that...' or 'don't forget...', always save it.\n"
+    "- When the user says 'forget...' or 'delete memory...', search and delete it.";
 
 /* ---- Interrupt check ---- */
 
