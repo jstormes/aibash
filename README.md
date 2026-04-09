@@ -96,11 +96,18 @@ cat > ~/.bashllmrc << 'EOF'
 [settings]
 command_not_found = 1
 
+[memory]
+url = http://localhost:8081/v1/chat/completions
+model = Qwen3.5-4B
+
 [local]
 url = http://localhost:8080/v1/chat/completions
 model = Qwen3-4B
 EOF
 ```
+
+The `[memory]` section is optional -- without it, automatic memory
+extraction is disabled but explicit commands still work.
 
 3. Launch:
 
@@ -273,19 +280,49 @@ each query, aibash searches memories for keywords matching your input and
 this context but the user doesn't (unless debug/label mode is on).
 
 ```
-$ llm remember my name is Bob
-Remembered: my name is Bob
+$ llm remember my name is James
+Remembered: my name is James
 
-$ llm remember I prefer Python for scripting
-Remembered: I prefer Python for scripting
+$ llm I prefer Python for scripts, use neovim, and deploy to AWS
+# → main agent responds, then background memory agent auto-extracts:
+#   [3] User prefers Python for scripts
+#   [4] User uses neovim as editor
+#   [5] User deploys to AWS
 
 # Later, even in a new session:
-$ llm what is my name
-Bob
+$ llm what do you know about me
+You are James, a DevOps engineer who prefers Python for scripting
+and deploys to AWS.
 
-$ llm write me a script to parse CSV files
-# → LLM knows to use Python because of whispered memory
+$ llm actually I switched to helix editor
+# → memory agent replaces neovim entry with helix
+
+$ llm please forget everything about my editor
+# → main agent searches memories, deletes editor entries
+Done — editor-related memories deleted.
 ```
+
+### Memory Agent (Background)
+
+After each conversation, a **background memory agent** automatically
+extracts facts worth remembering. It uses a two-pass approach:
+
+**Pass 1 -- Fast extraction (thinking off):** Quickly scans the
+conversation and saves any new facts. Takes 2-3 seconds.
+
+**Pass 2 -- Cleanup (thinking on):** Reviews all memories and:
+- Splits compound entries into individual facts
+- Resolves conflicts (replaces outdated memories)
+- Removes duplicates
+
+The thinking mode lets the model reason through complex cleanup
+logic. Both passes run in a forked background process -- the user
+is already back at their prompt and never waits.
+
+The memory agent requires its own LLM server, configured via the
+`[memory]` section in `~/.bashllmrc`. A small, fast model like
+Qwen3.5-4B works well. An instruct-only or thinking-capable model
+is recommended.
 
 ### Memory Commands
 
@@ -295,23 +332,23 @@ $ llm write me a script to parse CSV files
 | `llm memories` | List all saved memories with IDs |
 | `llm forget <id>` | Delete a memory by ID |
 | `llm forget <text>` | Delete memories matching text |
+| `llm please forget <topic>` | Natural language forget (LLM searches and deletes) |
 | `llm_config --memories` | Show memory stats |
 
 ### LLM Memory Tools
 
-The LLM can also manage memories during the agentic loop:
+The main LLM agent can also manage memories during the agentic loop:
 
-- **`memory_save`** -- The LLM proactively saves facts when the user shares
-  preferences or important context (e.g., "I always deploy to AWS")
-- **`memory_search`** -- The LLM searches memories when it needs context
-  from previous sessions
-- **`memory_forget`** -- The LLM can remove outdated memories
+- **`memory_save`** -- Save facts when the user shares preferences
+- **`memory_search`** -- Search memories for context from previous sessions
+- **`memory_forget`** -- Delete memories by ID (uses search→forget workflow)
+- **`memory_list`** -- List all saved memories
 
 ### Whisper Injection
 
 Before each query, relevant memories are automatically injected into the
 system prompt as a `[memory context]` block. In label/debug mode, you can
-see what was whispered:
+see what was whispered and what the memory agent extracted:
 
 ```
 $ llm_config --labels
@@ -319,6 +356,7 @@ Labels: on
 $ llm help me with the database
 [mem] - this project uses PostgreSQL 16
 [mem] - User prefers Python for scripting
+[mem-agent] extracted: User is working on database tasks
 ...
 ```
 
@@ -328,7 +366,17 @@ $ llm help me with the database
 [settings]
 memory = 1          # 0=off, 1=on (default: 1)
 memory_max = 200    # max entries before oldest are evicted (default: 200)
+
+[memory]
+url = http://ai3:8080/v1/chat/completions
+model = Qwen3.5-4B
+# key = optional-api-key
 ```
+
+The memory agent is active when `memory = 1` AND a `[memory]` section
+with a `url` is present. Without the `[memory]` section, explicit
+commands (`llm remember`, `llm forget`) and the main agent's memory
+tools still work -- only automatic background extraction is disabled.
 
 ### Storage
 
@@ -340,11 +388,24 @@ The rolling window evicts the oldest entries when `memory_max` is reached.
 
 For CPU-only local inference with tool calling support:
 
+**Main agent** (quality matters, user is waiting):
+
 | Model | RAM | Notes |
 |-------|-----|-------|
-| Qwen3-1.7B | ~1.5GB | Fast, good tool calling |
-| Qwen3-4B | ~3GB | Best balance of speed and quality |
-| Qwen3-8B | ~5.5GB | Slower but more capable |
+| Qwen3-4B | ~3GB | Good for simple tasks |
+| Qwen3.5-9B | ~6.5GB | Best quality under 10B |
+| Qwen3.5-122B (MoE) | ~80GB | Top quality, needs big server |
+
+**Memory agent** (speed matters, runs in background):
+
+| Model | RAM | Notes |
+|-------|-----|-------|
+| Qwen3.5-4B Q6 | ~3.5GB | Recommended -- good extraction with thinking |
+| Qwen3-4B-Instruct Q8 | ~4GB | Alternative -- instruct-only, no thinking overhead |
+
+The memory agent benefits from thinking-capable models (Qwen3.5) for the
+cleanup pass. Instruct-only models (Qwen3-Instruct) work for extraction
+but produce lower quality conflict resolution.
 
 Use [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` for
 the simplest local setup with OpenAI-compatible API and tool calling.
@@ -354,9 +415,14 @@ the simplest local setup with OpenAI-compatible API and tool calling.
 The LLM integration is implemented as:
 
 - **`lib/llm/`** -- Self-contained library (`libllm.a`) with the API client,
-  tool system, agentic loop, and supporting modules. Adapted from
+  tool system, agentic loop, memory store, and memory agent. Adapted from
   [llmsh](lib/llm/llmsh-upstream/README.md) (upstream source preserved for
   reference).
+  - `llm_api.c` -- Main agent: curl/SSE streaming, tool call parsing
+  - `llm_memory.c` -- Memory store: save, search, whisper, forget
+  - `llm_mem_api.c` -- Memory agent API: separate curl client with own connection
+  - `llm_mem_agent.c` -- Two-pass extraction: fast extract + thinking cleanup
+  - `llm_shell.c` -- Agentic loop + background fork for memory agent
 - **`builtins/llm.def`**, **`llm_init.def`**, **`llm_config.def`** -- Thin
   bash builtin wrappers that bridge bash's `WORD_LIST` interface to the
   library's string-based API.
