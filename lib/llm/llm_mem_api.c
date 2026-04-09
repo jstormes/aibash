@@ -70,6 +70,7 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message)
     cJSON_AddStringToObject(req, "model", g_mem_model);
     cJSON_AddItemToObject(req, "messages", messages);
     cJSON_AddNumberToObject(req, "max_tokens", 1024);
+    cJSON_AddNumberToObject(req, "temperature", 0.1);
 
     char *body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
