@@ -158,8 +158,70 @@ static char *auto_keywords(const char *content)
 }
 
 /*
+ * Lightweight English stemmer: strip common suffixes.
+ * Modifies word in place, returns pointer to same buffer.
+ * Only stems words >= 5 chars to avoid over-stemming short words.
+ */
+static char *stem_word(char *word)
+{
+    size_t len = strlen(word);
+    if (len < 5) return word;
+
+    /* Longest suffixes first to avoid partial matches */
+    static const char *suffixes[] = {
+        "ation", "ment", "ness", "able", "ible", "ting",
+        "ing", "tion", "sion", "ous", "ive", "ize", "ise",
+        "ful", "less", "ally", "ely",
+        "ed", "er", "ly", "al", "es",
+        "s",
+        NULL
+    };
+
+    for (int i = 0; suffixes[i]; i++) {
+        size_t slen = strlen(suffixes[i]);
+        if (len > slen + 2 && strcasecmp(word + len - slen, suffixes[i]) == 0) {
+            word[len - slen] = '\0';
+            return word;
+        }
+    }
+
+    return word;
+}
+
+/*
+ * Check if stemmed word matches anywhere in text.
+ * Tokenizes text into words, stems each, compares.
+ */
+static int stem_match(const char *text, const char *stemmed_query_word)
+{
+    if (!text || !stemmed_query_word) return 0;
+
+    char *copy = strdup(text);
+    char *saveptr = NULL;
+    char *w = strtok_r(copy, " \t,.-/()[]{}:;'\"", &saveptr);
+
+    while (w) {
+        char stemmed[256];
+        size_t wlen = strlen(w);
+        if (wlen > 0 && wlen < sizeof(stemmed)) {
+            memcpy(stemmed, w, wlen + 1);
+            stem_word(stemmed);
+            if (strcasecmp(stemmed, stemmed_query_word) == 0) {
+                free(copy);
+                return 1;
+            }
+        }
+        w = strtok_r(NULL, " \t,.-/()[]{}:;'\"", &saveptr);
+    }
+
+    free(copy);
+    return 0;
+}
+
+/*
  * Score how well a memory matches a query.
- * Returns number of query words that match in content or keywords.
+ * Uses both exact substring match and stemmed match.
+ * Returns weighted score.
  */
 static int match_score(const mem_entry_t *mem, const char *query)
 {
@@ -171,10 +233,26 @@ static int match_score(const mem_entry_t *mem, const char *query)
     char *word = strtok_r(qcopy, " \t,", &saveptr);
     while (word) {
         if (strlen(word) >= 2) {
+            /* Exact substring match (strongest signal) */
             if (mem->content && strcasestr(mem->content, word))
-                score++;
-            if (mem->keywords && strcasestr(mem->keywords, word))
-                score++;
+                score += 2;
+            else if (mem->keywords && strcasestr(mem->keywords, word))
+                score += 2;
+            else {
+                /* Stemmed match (weaker but catches morphological variants) */
+                char stemmed[256];
+                size_t wlen = strlen(word);
+                if (wlen < sizeof(stemmed)) {
+                    memcpy(stemmed, word, wlen + 1);
+                    stem_word(stemmed);
+                    if (strlen(stemmed) >= 3) {
+                        if (stem_match(mem->content, stemmed))
+                            score += 1;
+                        else if (stem_match(mem->keywords, stemmed))
+                            score += 1;
+                    }
+                }
+            }
         }
         word = strtok_r(NULL, " \t,", &saveptr);
     }
