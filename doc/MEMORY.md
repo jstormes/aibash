@@ -215,14 +215,23 @@ Suffixes stripped: `-ation`, `-ment`, `-ness`, `-able`, `-ible`, `-ing`,
 `-tion`, `-sion`, `-ous`, `-ive`, `-ize`, `-ful`, `-less`, `-ed`,
 `-er`, `-ly`, `-al`, `-es`, `-s`
 
-Examples:
-- "deployment" → "deploy" matches "I deploy to AWS"
-- "containers" → "contain" matches "uses Docker for containers"
-- "databases" → "databas" matches "project database is MySQL"
-- "scripting" → "script" matches "prefer Python for scripts"
+**Stop word filtering:** Common English stop words are skipped during
+scoring to prevent false-positive matches. Words like "my", "the",
+"describe", "show", "tell" would otherwise match too broadly (e.g.,
+"my" matching "My name is James" when the user asked about their tech
+stack). The stop word list includes pronouns, articles, prepositions,
+auxiliary verbs, and common query verbs.
 
-This handles most queries including word form variations without
-needing to call the LLM.
+This filtering is important for the fallback mechanism: if a stop word
+causes a weak keyword match, the whisper agent fallback (Layer 2) never
+fires. Filtering ensures that queries with no meaningful keyword overlap
+correctly fall through to semantic LLM search.
+
+Examples:
+- "deployment" → "deploy" matches "I deploy to AWS" (stemming)
+- "containers" → "contain" matches "uses Docker for containers" (stemming)
+- "describe my tech stack" → "describe" and "my" filtered, "tech" and "stack" don't match → falls through to whisper agent (correct behavior)
+- "what database do I use" → "database" matches directly (fast path)
 
 ### Layer 2: Parallel Whisper Agents
 
