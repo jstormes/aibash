@@ -333,6 +333,7 @@ is recommended.
 | `llm forget <id>` | Delete a memory by ID |
 | `llm forget <text>` | Delete memories matching text |
 | `llm please forget <topic>` | Natural language forget (LLM searches and deletes) |
+| `llm cleanup` | Manually run memory cleanup (split, deduplicate, resolve) |
 | `llm_config --memories` | Show memory stats |
 
 ### LLM Memory Tools

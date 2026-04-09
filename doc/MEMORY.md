@@ -131,6 +131,7 @@ up specific memories during the agentic loop.
 **User commands:**
 ```bash
 llm memories               # list all saved memories
+llm cleanup                # manually run cleanup (split, deduplicate, resolve tombstones)
 llm_config --memories      # show memory stats
 ```
 
@@ -394,6 +395,7 @@ Labels:
 - Check the server isn't running with `--chat-template-kwargs '{"enable_thinking":false}'`
 
 **Conflicts not resolved:**
+- Run `llm cleanup` to manually trigger the cleanup pass
 - The 4B model resolves conflicts well but not perfectly
 - Manual cleanup: `llm memories` to see all, `llm forget <id>` to remove stale ones
 - Natural language: `llm please forget everything about <topic>`
