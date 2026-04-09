@@ -148,6 +148,12 @@ llm forget python
 llm please forget everything about my editor preference
 ```
 
+**Safety guardrails:** The `memory_forget` LLM tool requires user
+confirmation before deleting (safety tier: Confirm). The system prompt
+instructs the LLM to never delete memories unless explicitly asked, and
+to limit itself to one tool call per user request. This prevents the
+agent from mass-deleting memories during normal operation.
+
 ### Conflict Resolution
 
 When new information contradicts existing memories:

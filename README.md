@@ -247,7 +247,7 @@ User query
 | memory_save | Auto | Save a fact/preference to long-term memory |
 | memory_search | Auto | Search memories by keyword |
 | memory_list | Auto | List all saved memories |
-| memory_forget | Auto | Delete a memory by ID or content |
+| memory_forget | Confirm | Delete a memory by ID or content |
 
 ### Safety Tiers
 

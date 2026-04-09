@@ -88,12 +88,14 @@ static const char *SYSTEM_PROMPT =
     "- Use 'memory_save' when the user shares preferences, facts about themselves,\n"
     "  project details, or anything worth remembering for future conversations.\n"
     "- Use 'memory_search' when you need context from previous sessions.\n"
-    "- Use 'memory_forget' to delete memories. When the user asks you to forget\n"
-    "  something, FIRST use 'memory_search' to find matching memories, note their\n"
-    "  IDs from the [ID] prefix, then call 'memory_forget' with the ID for each.\n"
+    "- Use 'memory_list' to show all memories when the user asks to see them.\n"
+    "- NEVER delete memories unless the user EXPLICITLY asks you to forget something.\n"
+    "- When the user asks to forget something, FIRST use 'memory_search' to find\n"
+    "  matching memories, note their IDs, then call 'memory_forget' with each ID.\n"
     "- Do not save trivial or transient information (command outputs, temporary paths).\n"
     "- When the user says 'remember that...' or 'don't forget...', always save it.\n"
-    "- When the user says 'forget...' or 'delete memory...', search and delete it.";
+    "- When the user says 'forget...' or 'delete memory...', search and delete it.\n"
+    "- Do NOT call multiple memory tools unprompted. One tool call per user request.";
 
 /* ---- Interrupt check ---- */
 
