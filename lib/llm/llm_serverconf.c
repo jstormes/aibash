@@ -55,6 +55,11 @@ server_config_t *llm_serverconf_load(void)
                         cur = -1;
                         continue;
                     }
+                    if (strcmp(s + 1, "memory") == 0) {
+                        in_settings = 2;  /* 2 = memory section */
+                        cur = -1;
+                        continue;
+                    }
                     in_settings = 0;
                     if (conf->count < BASH_LLM_MAX_SERVERS) {
                         cur = conf->count++;
@@ -71,7 +76,19 @@ server_config_t *llm_serverconf_load(void)
             char *key = strip(s);
             char *val = strip(eq + 1);
 
-            if (in_settings) {
+            if (in_settings == 2) {
+                /* [memory] section */
+                if (strcmp(key, "url") == 0)
+                    conf->memory_api_url = strdup(val);
+                else if (strcmp(key, "model") == 0)
+                    conf->memory_model = strdup(val);
+                else if (strcmp(key, "key") == 0)
+                    conf->memory_api_key = strdup(val);
+                continue;
+            }
+
+            if (in_settings == 1) {
+                /* [settings] section */
                 if (strcmp(key, "max_iterations") == 0)
                     conf->max_iterations = atoi(val);
                 else if (strcmp(key, "man_enrich") == 0)
@@ -126,6 +143,9 @@ void llm_serverconf_free(server_config_t *conf)
         free(conf->servers[i].model);
         free(conf->servers[i].api_key);
     }
+    free(conf->memory_api_url);
+    free(conf->memory_model);
+    free(conf->memory_api_key);
     free(conf);
 }
 

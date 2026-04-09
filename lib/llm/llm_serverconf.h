@@ -22,6 +22,11 @@ typedef struct {
     int command_not_found;   /* 0=off, 1=on (default) -- route unknown commands to LLM */
     int memory_enabled;      /* 0=off, 1=on (default) -- long-term memory */
     int memory_max;          /* max memory entries (default: 200) */
+
+    /* Memory agent LLM (optional [memory] section) */
+    char *memory_api_url;
+    char *memory_model;
+    char *memory_api_key;
 } server_config_t;
 
 /* Load config from ~/.bashllmrc. Falls back to env vars. */

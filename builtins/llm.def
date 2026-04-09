@@ -72,6 +72,7 @@ $END
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
 #include "../lib/llm/llm_memory.h"
+#include "../lib/llm/llm_mem_agent.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -144,6 +145,13 @@ static int ensure_initialized(void)
         const char *home = getenv("HOME");
         snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
         llm_memory_init(memdir, g_servers->memory_max);
+    }
+
+    /* Initialize memory agent if configured */
+    if (g_servers->memory_enabled && g_servers->memory_api_url) {
+        llm_mem_agent_init(g_servers->memory_api_url,
+                           g_servers->memory_model,
+                           g_servers->memory_api_key);
     }
 
     /* Set up streaming callbacks */

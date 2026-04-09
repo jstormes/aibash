@@ -98,3 +98,11 @@ void stream_memory_output(const char *text)
     if (!text || !streams_label_mode) return;
     labeled_write(stderr, "mem", "\033[95m", text, &mem_sol);
 }
+
+static int agent_sol = 1;
+
+void stream_mem_agent_output(const char *text)
+{
+    if (!text || !streams_label_mode) return;
+    labeled_write(stderr, "mem-agent", "\033[93m", text, &agent_sol);
+}
