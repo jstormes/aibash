@@ -72,6 +72,11 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message)
     cJSON_AddNumberToObject(req, "max_tokens", 1024);
     cJSON_AddNumberToObject(req, "temperature", 0.1);
 
+    /* Disable thinking mode for Qwen3.5 models -- we want fast, direct output */
+    cJSON *kwargs = cJSON_CreateObject();
+    cJSON_AddBoolToObject(kwargs, "enable_thinking", 0);
+    cJSON_AddItemToObject(req, "chat_template_kwargs", kwargs);
+
     char *body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
     if (!body) return NULL;
