@@ -106,3 +106,11 @@ void stream_mem_agent_output(const char *text)
     if (!text || !streams_label_mode) return;
     labeled_write(stderr, "mem-agent", "\033[93m", text, &agent_sol);
 }
+
+static int whisper_sol = 1;
+
+void stream_whisper_output(const char *text)
+{
+    if (!text || !streams_label_mode) return;
+    labeled_write(stderr, "mem-whisper", "\033[96m", text, &whisper_sol);
+}

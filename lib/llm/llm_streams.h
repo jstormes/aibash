@@ -50,4 +50,7 @@ void stream_memory_output(const char *text);
 /* Write memory agent extraction debug info */
 void stream_mem_agent_output(const char *text);
 
+/* Write whisper agent debug info */
+void stream_whisper_output(const char *text);
+
 #endif /* BASH_LLM_STREAMS_H */

@@ -8,6 +8,8 @@
 #include "llm_api.h"
 #include "llm_history.h"
 #include "llm_memory.h"
+#include "llm_whisper.h"
+#include "llm_mem_agent.h"
 #include "llm_config.h"
 #include "llm_streams.h"
 #include "cJSON.h"
@@ -176,7 +178,13 @@ static char *build_system_prompt(const char *cwd, const char *last_output,
 
     /* Inject whispered memories if available */
     if (query) {
+        /* Fast keyword search first */
         char *whisper = llm_memory_whisper(query);
+
+        /* Fallback: LLM-powered parallel whisper agents */
+        if (!whisper && llm_mem_agent_ready())
+            whisper = llm_whisper_agents(query);
+
         if (whisper) {
             off += snprintf(sys_buf + off, sys_len - off,
                 "\n[memory context from long-term memory]\n%s"
