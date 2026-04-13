@@ -10,26 +10,24 @@ can recall automatically or on demand.
 ┌─────────────────────────────────────────────────────┐
 │                    User Query                        │
 │                                                      │
-│  ┌──────────────┐    ┌─────────────────────────┐    │
-│  │ Layer 1:     │    │ Layer 2:                 │    │
-│  │ Keyword      │───▶│ Parallel Whisper Agents  │    │
-│  │ Search       │ if │ (2 LLM agents on ai3)   │    │
-│  │ (<1ms)       │ no │ (2-5 sec fallback)       │    │
-│  │              │hit │                          │    │
-│  └──────┬───────┘    └────────────┬─────────────┘    │
-│         │                         │                   │
-│         └──────────┬──────────────┘                   │
-│                    ▼                                  │
-│         [memory context] injected                     │
-│         into system prompt                            │
-│                    │                                  │
-│                    ▼                                  │
-│         Main Agent (ai server)                        │
-│         responds to user                              │
-│                    │                                  │
-│                    ▼                                  │
 │  ┌─────────────────────────────────────┐             │
-│  │ Layer 3: Background Memory Agent    │             │
+│  │ Layer 1: LLM Whisper Agent          │             │
+│  │ (forked, calls memory server)       │             │
+│  │ Sends all memories + query          │             │
+│  │ Returns only DIRECTLY relevant ones │             │
+│  │ (2-5 sec, 5 sec timeout)            │             │
+│  └──────────────┬──────────────────────┘             │
+│                  ▼                                    │
+│       [memory context] injected                      │
+│       into system prompt (precise, minimal tokens)   │
+│                  │                                    │
+│                  ▼                                    │
+│       Main Agent (ai server)                         │
+│       responds to user                               │
+│                  │                                    │
+│                  ▼                                    │
+│  ┌─────────────────────────────────────┐             │
+│  │ Layer 2: Background Memory Agent    │             │
 │  │ (forked, user doesn't wait)         │             │
 │  │                                     │             │
 │  │ Pass 1: Extract facts (thinking off)│             │
@@ -196,59 +194,40 @@ Tombstones are:
 
 ## Whisper Layers in Detail
 
-### Layer 1: Keyword Search with Stemming
-
-- **Speed:** <1ms
-- **Method:** Exact substring match + lightweight English stemming
-- **When:** Every query
-- **Returns:** Top 10 matching memories (max ~2000 chars)
-
-The search uses two matching strategies with weighted scoring:
-
-**Exact match (2 points):** Case-insensitive substring search via
-`strcasestr()`. "deploy" in query matches "I deploy to AWS".
-
-**Stemmed match (1 point):** Strips common English suffixes to match
-morphological variants. Only applied to words >= 5 characters.
-
-Suffixes stripped: `-ation`, `-ment`, `-ness`, `-able`, `-ible`, `-ing`,
-`-tion`, `-sion`, `-ous`, `-ive`, `-ize`, `-ful`, `-less`, `-ed`,
-`-er`, `-ly`, `-al`, `-es`, `-s`
-
-**Stop word filtering:** Common English stop words are skipped during
-scoring to prevent false-positive matches. Words like "my", "the",
-"describe", "show", "tell" would otherwise match too broadly (e.g.,
-"my" matching "My name is James" when the user asked about their tech
-stack). The stop word list includes pronouns, articles, prepositions,
-auxiliary verbs, and common query verbs.
-
-This filtering is important for the fallback mechanism: if a stop word
-causes a weak keyword match, the whisper agent fallback (Layer 2) never
-fires. Filtering ensures that queries with no meaningful keyword overlap
-correctly fall through to semantic LLM search.
-
-Examples:
-- "deployment" → "deploy" matches "I deploy to AWS" (stemming)
-- "containers" → "contain" matches "uses Docker for containers" (stemming)
-- "describe my tech stack" → "describe" and "my" filtered, "tech" and "stack" don't match → falls through to whisper agent (correct behavior)
-- "what database do I use" → "database" matches directly (fast path)
-
-### Layer 2: Parallel Whisper Agents
+### Layer 1: LLM Whisper Agent
 
 - **Speed:** 2-5 seconds
-- **Method:** Two LLM agents fork in parallel, each analyzing all memories
-  against the query for semantic relevance
-- **When:** Only when Layer 1 finds nothing (fallback)
-- **Timeout:** 5 seconds -- if agents don't respond, query proceeds without
-- **Slots required:** 2 (configure memory server with `-np 2`)
+- **Method:** Forked LLM agent on memory server semantically matches
+  memories to the query
+- **When:** Every query (if memory agent is configured)
+- **Timeout:** 5 seconds -- if agent doesn't respond, query proceeds without
+- **Slots required:** 1
 
-Agent 1 focuses on user preferences and personal context.
-Agent 2 focuses on project and technical context.
+The whisper agent receives all memories plus the user's query and
+returns only the memories that DIRECTLY answer or relate to the
+specific question. The prompt instructs the model to be strict --
+only include memories the user would need to answer this exact
+question, not loosely related ones.
 
-This catches queries like "describe my infrastructure setup" where no
-single keyword matches but multiple memories are semantically relevant.
+This produces precise, context-efficient results:
 
-### Layer 3: Background Extraction
+| Query | Whispered | Not whispered |
+|-------|-----------|---------------|
+| "what database do I use" | MySQL only | Docker, Python, AWS, family |
+| "tell me about my family" | wife, kids, name | ice cream, tech stack |
+| "describe my tech stack" | all tech memories | family, ice cream |
+| "what's the weather" | NONE | everything |
+
+**Context conservation:** The LLM agent typically injects fewer, more
+relevant memories than keyword search would. A specific query like
+"what database" injects ~15 tokens instead of ~150. This leaves more
+context window for the actual conversation.
+
+Note: keyword search with stemming and stop word filtering is still
+available in the `memory_search` tool for the main agent to use
+during the agentic loop, but is no longer used for whisper injection.
+
+### Layer 2: Background Extraction
 
 - **Speed:** 5-30 seconds (user doesn't wait)
 - **Method:** Double-fork background process, two-pass LLM analysis

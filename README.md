@@ -345,46 +345,41 @@ The main LLM agent can also manage memories during the agentic loop:
 - **`memory_forget`** -- Delete memories by ID (uses search→forget workflow)
 - **`memory_list`** -- List all saved memories
 
-### Whisper Injection (Three Layers)
+### Whisper Injection (Two Layers)
 
 Before each query, relevant memories are injected into the system prompt.
-The whisper system has three layers:
+The whisper system has two layers:
 
-**Layer 1 -- Keyword search with stemming (<1ms):** Fast substring
-matching plus lightweight English stemming. "deployment" matches
-"deploy", "containers" matches "container", etc. Handles most queries
-instantly including word form variations.
+**Layer 1 -- LLM whisper agent (2-5s):** A forked LLM agent on the
+memory server semantically searches all memories for ones that DIRECTLY
+relate to the user's query. Only memories needed to answer the specific
+question are injected -- not loosely related ones. This produces precise,
+context-efficient results that conserve the main agent's context window.
 
-**Layer 2 -- Parallel whisper agents (2-5s, fallback):** When keyword
-search finds nothing, two LLM-powered agents fork in parallel and
-semantically search all memories for relevant context:
-- Agent 1 searches for user preferences and personal context
-- Agent 2 searches for project and technical context
-
-Both call the memory agent LLM simultaneously. Results are merged with
-a 5-second timeout -- if agents don't respond in time, the query
-proceeds without whispered context.
-
-**Layer 3 -- Background extraction (post-response):** After each
+**Layer 2 -- Background extraction (post-response):** After each
 conversation, a background process extracts new facts (see Memory Agent
 section above).
 
-In label/debug mode, you can see which layer was used:
+In label/debug mode, you can see what gets whispered:
 
 ```
 $ llm_config --labels
 Labels: on
 
 $ llm what database do I use
-[mem] - The main project database is PostgreSQL 16     ← Layer 1: keyword hit
+[mem-whisper] searching memories...
+[mem-whisper] - The project database is MySQL
 
-$ llm describe my infrastructure setup
-[mem-whisper] searching (2 agents)...                  ← Layer 2: fallback
-[mem-whisper] - User deploys to AWS us-east-1
-[mem-whisper] - The main project database is PostgreSQL 16
-[mem-whisper] - The CI pipeline uses GitHub Actions
+$ llm describe my tech stack
+[mem-whisper] searching memories...
+[mem-whisper] - I work as a DevOps engineer
+[mem-whisper] - I prefer Python for scripting
+[mem-whisper] - I deploy to AWS us-east-1
+[mem-whisper] - The project database is MySQL
+[mem-whisper] - I use Docker for containers
+[mem-whisper] - I am learning Rust
 
-[mem-agent] extracted: User asked about infrastructure  ← Layer 3: background
+[mem-agent] extracted: User asked about tech stack      ← Layer 2: background
 ```
 
 ### Configuration
