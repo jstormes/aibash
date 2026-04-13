@@ -61,7 +61,7 @@ $END
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
-#include "../lib/llm/llm_global_mem_agent.h"
+#include "../lib/llm/agents/mem_agent.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 
@@ -143,7 +143,7 @@ llm_config_builtin (WORD_LIST *list)
                 : "Debug mode: off\n");
         }
         else if (strcmp(arg, "--memories") == 0) {
-            printf("Memories: %d entries\n", llm_global_mem_agent_count());
+            printf("Memories: %d entries\n", mem_agent_count());
             printf("Memory enabled: %s\n", g_servers->memory_enabled ? "yes" : "no");
             printf("Memory max: %d\n", g_servers->memory_max);
         }

@@ -7,7 +7,7 @@
 
 #include "llm_api.h"
 #include "llm_history.h"
-#include "llm_side_agent.h"
+#include "agents/side_agent.h"
 #include "llm_log.h"
 #include "llm_config.h"
 #include "llm_streams.h"

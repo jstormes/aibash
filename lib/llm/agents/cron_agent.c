@@ -234,10 +234,30 @@ int cron_agent_init_with_deps(const char *storage_dir, const cron_agent_deps_t *
     return 0;
 }
 
+#ifndef AGENT_TESTING
+extern char *llm_global_mem_api_chat(const char *, const char *, int, const char *);
+#endif
+
 int cron_agent_init(void *config)
 {
     (void)config;
-    return -1;  /* Not yet wired to production deps */
+
+#ifdef AGENT_TESTING
+    return -1;  /* tests use cron_agent_init_with_deps() */
+#else
+    const char *home = getenv("HOME");
+    char crondir[4096];
+    snprintf(crondir, sizeof(crondir), "%s/.aibash_cron", home ? home : ".");
+
+    cron_agent_deps_t deps = {
+        .api_chat      = llm_global_mem_api_chat,
+        .crontab_sync  = NULL,
+        .at_create     = NULL,
+        .at_remove     = NULL,
+    };
+
+    return cron_agent_init_with_deps(crondir, &deps);
+#endif
 }
 
 void cron_agent_cleanup(void)

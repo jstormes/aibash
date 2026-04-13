@@ -288,10 +288,18 @@ char *global_mem_agent_pre_query_cb(const char *query, const char *cwd)
     char *agent_msg = build_search_message(query);
     if (!agent_msg) return NULL;
 
+    /* Debug: verify API state in forked child */
+    fprintf(stderr, "[mem-debug] agent_ready=%d, msg_len=%zu\n",
+            g_agent_ready, strlen(agent_msg));
+    fflush(stderr);
+
     stream_global_mem_agent_output("searching memories...\n");
 
     char *result = llm_global_mem_api_chat(SEARCH_PROMPT, agent_msg, 0, "mem-search");
     free(agent_msg);
+
+    fprintf(stderr, "[mem-debug] LLM result: %.200s\n", result ? result : "(NULL)");
+    fflush(stderr);
 
     if (is_empty_response(result)) {
         free(result);

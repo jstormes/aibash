@@ -86,8 +86,8 @@ extern int evalstring (char *, const char *, int);
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
-#include "../lib/llm/llm_global_mem_agent.h"
-#include "../lib/llm/llm_side_agent.h"
+#include "../lib/llm/agents/agents_setup.h"
+#include "../lib/llm/agents/mem_agent.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -149,8 +149,8 @@ llm_init_builtin (WORD_LIST *list)
     llm_router_init(g_servers);
 
     /* Initialize all side agents (memory, cron, etc.) */
-    side_agent_init(g_servers);
-    int mem_count = llm_global_mem_agent_count();
+    agents_setup(g_servers);
+    int mem_count = mem_agent_count();
 
     /* Set up streaming callbacks -- same as llm builtin's ensure_initialized */
     extern void chat_token_cb(const char *token, void *userdata);

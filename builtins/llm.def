@@ -77,9 +77,10 @@ $END
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
-#include "../lib/llm/llm_global_mem_agent.h"
-#include "../lib/llm/llm_cron_agent.h"
-#include "../lib/llm/llm_side_agent.h"
+#include "../lib/llm/agents/agents_setup.h"
+#include "../lib/llm/agents/side_agent.h"
+#include "../lib/llm/agents/mem_agent.h"
+#include "../lib/llm/agents/cron_agent.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -146,8 +147,8 @@ static int ensure_initialized(void)
     llm_tools_init();
     llm_router_init(g_servers);
 
-    /* Initialize all side agents (memory, cron, etc.) */
-    side_agent_init(g_servers);
+    /* Register and initialize all side agents */
+    agents_setup(g_servers);
 
     /* Set up streaming callbacks */
     g_stream_cbs.on_token = chat_token_cb;
@@ -214,7 +215,7 @@ llm_builtin (WORD_LIST *list)
                 return (EXECUTION_FAILURE);
             }
             char *text = string_list(list);
-            if (llm_global_mem_remember(text) == 0)
+            if (mem_agent_remember(text) == 0)
                 printf("Remembered: %s\n", text);
             else
                 builtin_error("failed to save memory");
@@ -233,13 +234,13 @@ llm_builtin (WORD_LIST *list)
             char *endp;
             long id = strtol(arg, &endp, 10);
             if (*endp == '\0' && endp != arg) {
-                if (llm_global_mem_forget((int)id) == 0)
+                if (mem_agent_forget((int)id) == 0)
                     printf("Forgot memory #%ld\n", id);
                 else
                     builtin_error("memory #%ld not found", id);
             } else {
                 char *text = string_list(list);
-                if (llm_global_mem_forget_match(text) == 0)
+                if (mem_agent_forget_match(text) == 0)
                     printf("Forgot matching memories\n");
                 else
                     builtin_error("no matching memories found");
@@ -249,21 +250,21 @@ llm_builtin (WORD_LIST *list)
         }
 
         if (strcmp(cmd, "memories") == 0) {
-            char *list_text = llm_global_mem_list();
+            char *list_text = mem_agent_list();
             printf("%s", list_text);
             free(list_text);
             return (EXECUTION_SUCCESS);
         }
 
         if (strcmp(cmd, "cleanup") == 0) {
-            if (!llm_global_mem_agent_ready()) {
+            if (!mem_agent_ready()) {
                 builtin_error("memory agent not configured (need [memory] section in ~/.bashllmrc)");
                 return (EXECUTION_FAILURE);
             }
             printf("Running memory cleanup...\n");
             fflush(stdout);
 
-            llm_global_mem_agent_cleanup_run(g_servers->memory_max);
+            mem_agent_run_cleanup();
             printf("Cleanup complete.\n");
 
             return (EXECUTION_SUCCESS);
@@ -272,7 +273,7 @@ llm_builtin (WORD_LIST *list)
         if (strcmp(cmd, "cron") == 0) {
             list = list->next;
             if (!list || strcmp(list->word->word, "list") == 0) {
-                char *jobs = llm_cron_list();
+                char *jobs = cron_agent_list();
                 printf("%s", jobs);
                 free(jobs);
                 return (EXECUTION_SUCCESS);
@@ -285,7 +286,7 @@ llm_builtin (WORD_LIST *list)
                     return (EXECUTION_FAILURE);
                 }
                 int id = atoi(list->word->word);
-                if (llm_cron_remove(id) == 0)
+                if (cron_agent_remove(id) == 0)
                     printf("Removed scheduled task #%d\n", id);
                 else
                     builtin_error("task #%d not found", id);

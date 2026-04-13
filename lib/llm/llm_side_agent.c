@@ -72,11 +72,10 @@ char *side_agents_pre_query(const char *query, const char *cwd)
         }
 
         if (pid == 0) {
-            /* Child: clean environment for curl */
-            close(STDIN_FILENO);
+            /* Child */
             close(slots[s].fd);  /* close our read-end */
+            close(STDIN_FILENO);
             signal(SIGPIPE, SIG_DFL);
-            signal(SIGCHLD, SIG_DFL);
 
             int my_fd = write_fds[s];
             int idx = slots[s].agent_idx;

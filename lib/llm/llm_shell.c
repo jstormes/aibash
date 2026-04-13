@@ -8,7 +8,7 @@
 #include "llm_api.h"
 #include "llm_router.h"
 #include "llm_history.h"
-#include "llm_side_agent.h"
+#include "agents/side_agent.h"
 #include "llm_streams.h"
 #include "cJSON.h"
 

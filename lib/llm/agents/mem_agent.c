@@ -281,13 +281,43 @@ int mem_agent_init_with_deps(void *config, const mem_agent_deps_t *deps)
     return 0;
 }
 
+/* Production dependencies — linked from libllm.a in production,
+ * absent in test binary (test uses mem_agent_init_with_deps instead) */
+#ifndef AGENT_TESTING
+extern int   llm_memory_init(const char *, int);
+extern void  llm_memory_cleanup(void);
+extern int   llm_memory_save(const char *, const char *);
+extern int   llm_memory_forget(int);
+extern int   llm_memory_forget_match(const char *);
+extern char *llm_memory_list(void);
+extern int   llm_memory_count(void);
+extern int   llm_global_mem_api_init(const char *, const char *, const char *);
+extern void  llm_global_mem_api_cleanup(void);
+extern char *llm_global_mem_api_chat(const char *, const char *, int, const char *);
+extern void  llm_log_init(const char *);
+#endif
+
 int mem_agent_init(void *config)
 {
-    /* Production init — would wire up real llm_memory_*, llm_global_mem_api_*, etc.
-     * For now this is a placeholder. The actual wiring happens when we integrate
-     * with the existing codebase. */
-    (void)config;
-    return -1;  /* Not yet wired to production deps */
+#ifdef AGENT_TESTING
+    return -1;  /* tests use mem_agent_init_with_deps() */
+#else
+    mem_agent_deps_t deps = {
+        .mem_init         = llm_memory_init,
+        .mem_cleanup      = llm_memory_cleanup,
+        .mem_save         = llm_memory_save,
+        .mem_forget       = llm_memory_forget,
+        .mem_forget_match = llm_memory_forget_match,
+        .mem_list         = llm_memory_list,
+        .mem_count        = llm_memory_count,
+        .api_init         = llm_global_mem_api_init,
+        .api_cleanup      = llm_global_mem_api_cleanup,
+        .api_chat         = llm_global_mem_api_chat,
+        .log_init         = llm_log_init,
+    };
+
+    return mem_agent_init_with_deps(config, &deps);
+#endif
 }
 
 void mem_agent_cleanup(void)
