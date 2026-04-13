@@ -14,7 +14,7 @@ void llm_log_init(const char *log_dir);
  * Log an API request/response pair.
  * Creates a new file per call: <timestamp>_<caller>.json
  *
- * caller: identifier (e.g., "main_chat", "whisper", "extract", "cleanup")
+ * caller: identifier (e.g., "main_chat", "mem-search", "extract", "cleanup")
  * request_body: the JSON body sent to the API (will be pretty-printed)
  * response_body: the raw response from the API (will be pretty-printed)
  * elapsed_ms: time taken for the API call

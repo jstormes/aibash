@@ -38,11 +38,11 @@ Subcommands:
 
 Concatenates arguments into a query and sends it to the configured
 LLM server. The LLM can call tools (ls, cat, grep, run, man,
-memory_save, memory_search, etc.) and will iterate until it produces
-a final text answer or the max iterations limit is reached.
+etc.) and will iterate until it produces a final text answer or
+the max iterations limit is reached.
 
-Relevant long-term memories are automatically whispered into the
-system prompt before each query.
+Relevant long-term memories are automatically injected into the
+system prompt before each query by the global memory side agent.
 
 LLM responses stream to stdout. Tool status goes to stderr.
 
@@ -72,8 +72,8 @@ $END
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
-#include "../lib/llm/llm_memory.h"
-#include "../lib/llm/llm_mem_agent.h"
+#include "../lib/llm/llm_global_mem_agent.h"
+#include "../lib/llm/llm_side_agent.h"
 #include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
@@ -141,12 +141,16 @@ static int ensure_initialized(void)
     llm_tools_init();
     llm_router_init(g_servers);
 
-    /* Initialize long-term memory */
+    /* Initialize global memory agent (owns the memory store) */
     if (g_servers->memory_enabled) {
         char memdir[4096];
         const char *home = getenv("HOME");
         snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
-        llm_memory_init(memdir, g_servers->memory_max);
+
+        llm_global_mem_agent_init(memdir, g_servers->memory_max,
+                                  g_servers->memory_api_url,
+                                  g_servers->memory_model,
+                                  g_servers->memory_api_key);
 
         /* Initialize API logging */
         char logdir[4096];
@@ -154,12 +158,8 @@ static int ensure_initialized(void)
         llm_log_init(logdir);
     }
 
-    /* Initialize memory agent if configured */
-    if (g_servers->memory_enabled && g_servers->memory_api_url) {
-        llm_mem_agent_init(g_servers->memory_api_url,
-                           g_servers->memory_model,
-                           g_servers->memory_api_key);
-    }
+    /* Initialize side agent framework (registers global memory agent, etc.) */
+    side_agent_init();
 
     /* Set up streaming callbacks */
     g_stream_cbs.on_token = chat_token_cb;
@@ -226,7 +226,7 @@ llm_builtin (WORD_LIST *list)
                 return (EXECUTION_FAILURE);
             }
             char *text = string_list(list);
-            if (llm_memory_save(text, NULL) == 0)
+            if (llm_global_mem_remember(text) == 0)
                 printf("Remembered: %s\n", text);
             else
                 builtin_error("failed to save memory");
@@ -245,13 +245,13 @@ llm_builtin (WORD_LIST *list)
             char *endp;
             long id = strtol(arg, &endp, 10);
             if (*endp == '\0' && endp != arg) {
-                if (llm_memory_forget((int)id) == 0)
+                if (llm_global_mem_forget((int)id) == 0)
                     printf("Forgot memory #%ld\n", id);
                 else
                     builtin_error("memory #%ld not found", id);
             } else {
                 char *text = string_list(list);
-                if (llm_memory_forget_match(text) == 0)
+                if (llm_global_mem_forget_match(text) == 0)
                     printf("Forgot matching memories\n");
                 else
                     builtin_error("no matching memories found");
@@ -261,27 +261,21 @@ llm_builtin (WORD_LIST *list)
         }
 
         if (strcmp(cmd, "memories") == 0) {
-            char *list_text = llm_memory_list();
+            char *list_text = llm_global_mem_list();
             printf("%s", list_text);
             free(list_text);
             return (EXECUTION_SUCCESS);
         }
 
         if (strcmp(cmd, "cleanup") == 0) {
-            if (!llm_mem_agent_ready()) {
+            if (!llm_global_mem_agent_ready()) {
                 builtin_error("memory agent not configured (need [memory] section in ~/.bashllmrc)");
                 return (EXECUTION_FAILURE);
             }
             printf("Running memory cleanup...\n");
             fflush(stdout);
 
-            const char *home = getenv("HOME");
-            char memdir[4096];
-            snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
-
-            /* Run extraction with empty conversation (cleanup only) */
-            llm_mem_agent_extract("(cleanup requested by user)", memdir,
-                                   g_servers->memory_max);
+            llm_global_mem_agent_cleanup_run(g_servers->memory_max);
             printf("Cleanup complete.\n");
 
             return (EXECUTION_SUCCESS);

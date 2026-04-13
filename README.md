@@ -161,7 +161,7 @@ llm -c                        # clear conversation history
 llm find all .c files over 10k
 ```
 
-The LLM can call tools (ls, cat, grep, run, man, memory, etc.) and will
+The LLM can call tools (ls, cat, grep, run, man, etc.) and will
 iterate until it produces a final text answer or the max iterations limit
 is reached.
 
@@ -173,11 +173,13 @@ llm remember this project uses PostgreSQL  # save project context
 llm memories                               # list all saved memories
 llm forget 3                               # delete memory by ID
 llm forget Python                          # delete by content match
+llm cleanup                                # run memory deduplication/cleanup
 ```
 
-These commands manage memory directly without calling the LLM. The LLM
-can also use memory tools (`memory_save`, `memory_search`, `memory_forget`)
-during the agentic loop.
+All memory operations go through the **global memory side agent**, which
+owns the memory store exclusively. The main LLM agent has no direct
+access to memory data -- it only receives relevant context injected into
+its system prompt by the side agent before each query.
 
 ### `llm_init [-n]`
 
@@ -244,10 +246,6 @@ User query
 | write_file | Confirm | Write content to file |
 | rm | Danger | Remove files |
 | run | Auto/Confirm | Execute arbitrary pipeline |
-| memory_save | Auto | Save a fact/preference to long-term memory |
-| memory_search | Auto | Search memories by keyword |
-| memory_list | Auto | List all saved memories |
-| memory_forget | Confirm | Delete a memory by ID or content |
 
 ### Safety Tiers
 
@@ -269,118 +267,64 @@ the `man` tool for detailed flag and option documentation.
 
 ## Long-Term Memory
 
-aibash includes a persistent long-term memory system that lets the LLM
-remember facts, preferences, and project context across sessions.
+aibash includes a persistent long-term memory system managed by the
+**global memory side agent**. The agent owns the memory store exclusively
+-- no other code accesses memory data directly.
 
 ### How It Works
 
-Memories are stored as JSON in `~/.aibash_memories/memories.json`. Before
-each query, aibash searches memories for keywords matching your input and
-"whispers" relevant context into the LLM's system prompt. The LLM sees
-this context but the user doesn't (unless debug/label mode is on).
+The global memory side agent has two roles:
+
+**Pre-query (search):** Before each LLM call, the agent forks a child
+process that sends all memories + the user's query to a small LLM. The
+LLM returns only memories that DIRECTLY relate to the query. These are
+injected into the main agent's system prompt as `[global_memory context]`.
+
+**Post-query (extraction):** After each conversation, a background process
+extracts facts worth remembering using a two-pass approach:
+- Pass 1 (thinking off): Quick scan, extract obvious facts
+- Pass 2 (thinking on): Split compound entries, resolve conflicts, deduplicate
 
 ```
 $ llm remember my name is James
 Remembered: my name is James
 
-$ llm I prefer Python for scripts, use neovim, and deploy to AWS
-# → main agent responds, then background memory agent auto-extracts:
+$ llm I prefer Python for scripts and deploy to AWS
+# → main agent responds, then background extraction auto-saves:
 #   [3] User prefers Python for scripts
-#   [4] User uses neovim as editor
-#   [5] User deploys to AWS
+#   [4] User deploys to AWS
 
 # Later, even in a new session:
 $ llm what do you know about me
-You are James, a DevOps engineer who prefers Python for scripting
-and deploys to AWS.
-
-$ llm actually I switched to helix editor
-# → memory agent replaces neovim entry with helix
-
-$ llm please forget everything about my editor
-# → main agent searches memories, deletes editor entries
-Done — editor-related memories deleted.
+# → [global-mem] searching memories...
+# → [global-mem] - My name is James Stormes
+# → [global-mem] - I work as a DevOps engineer
+You are James Stormes, a DevOps engineer who prefers Python...
 ```
-
-### Memory Agent (Background)
-
-After each conversation, a **background memory agent** automatically
-extracts facts worth remembering. It uses a two-pass approach:
-
-**Pass 1 -- Fast extraction (thinking off):** Quickly scans the
-conversation and saves any new facts. Takes 2-3 seconds.
-
-**Pass 2 -- Cleanup (thinking on):** Reviews all memories and:
-- Splits compound entries into individual facts
-- Resolves conflicts (replaces outdated memories)
-- Removes duplicates
-
-The thinking mode lets the model reason through complex cleanup
-logic. Both passes run in a forked background process -- the user
-is already back at their prompt and never waits.
-
-The memory agent requires its own LLM server, configured via the
-`[memory]` section in `~/.bashllmrc`. A small, fast model like
-Qwen3.5-4B works well. An instruct-only or thinking-capable model
-is recommended.
 
 ### Memory Commands
 
 | Command | Description |
 |---------|-------------|
-| `llm remember <text>` | Save a fact directly (no LLM call) |
+| `llm remember <text>` | Save a fact to memory |
 | `llm memories` | List all saved memories with IDs |
 | `llm forget <id>` | Delete a memory by ID |
 | `llm forget <text>` | Delete memories matching text |
-| `llm please forget <topic>` | Natural language forget (LLM searches and deletes) |
-| `llm cleanup` | Manually run memory cleanup (split, deduplicate, resolve) |
+| `llm cleanup` | Run memory cleanup (split, deduplicate, resolve) |
 | `llm_config --memories` | Show memory stats |
 
-### LLM Memory Tools
+All commands go through the global memory agent. The main LLM agent
+has no memory tools -- it only receives context via the side agent.
 
-The main LLM agent can also manage memories during the agentic loop:
+### Side Agent Framework
 
-- **`memory_save`** -- Save facts when the user shares preferences
-- **`memory_search`** -- Search memories for context from previous sessions
-- **`memory_forget`** -- Delete memories by ID (uses search→forget workflow)
-- **`memory_list`** -- List all saved memories
+The memory system is built on a generic **side agent framework** that
+handles all fork/pipe/select/reap plumbing. Each side agent can have:
+- A `pre_query` callback (forked child, pipe results back with timeout)
+- A `post_query` callback (double-forked grandchild, fire-and-forget)
 
-### Whisper Injection (Two Layers)
-
-Before each query, relevant memories are injected into the system prompt.
-The whisper system has two layers:
-
-**Layer 1 -- LLM whisper agent (2-5s):** A forked LLM agent on the
-memory server semantically searches all memories for ones that DIRECTLY
-relate to the user's query. Only memories needed to answer the specific
-question are injected -- not loosely related ones. This produces precise,
-context-efficient results that conserve the main agent's context window.
-
-**Layer 2 -- Background extraction (post-response):** After each
-conversation, a background process extracts new facts (see Memory Agent
-section above).
-
-In label/debug mode, you can see what gets whispered:
-
-```
-$ llm_config --labels
-Labels: on
-
-$ llm what database do I use
-[mem-whisper] searching memories...
-[mem-whisper] - The project database is MySQL
-
-$ llm describe my tech stack
-[mem-whisper] searching memories...
-[mem-whisper] - I work as a DevOps engineer
-[mem-whisper] - I prefer Python for scripting
-[mem-whisper] - I deploy to AWS us-east-1
-[mem-whisper] - The project database is MySQL
-[mem-whisper] - I use Docker for containers
-[mem-whisper] - I am learning Rust
-
-[mem-agent] extracted: User asked about tech stack      ← Layer 2: background
-```
+Adding new side agents (e.g., cron reminders, local directory context)
+requires only writing callbacks and registering them.
 
 ### Configuration
 
@@ -395,14 +339,12 @@ model = Qwen3.5-4B
 # key = optional-api-key
 ```
 
-The memory agent is active when `memory = 1` AND a `[memory]` section
+The agent LLM is active when `memory = 1` AND a `[memory]` section
 with a `url` is present. Without the `[memory]` section, explicit
-commands (`llm remember`, `llm forget`) and the main agent's memory
-tools still work -- only automatic extraction and whisper agents are
-disabled.
+commands (`llm remember`, `llm forget`) still work -- only automatic
+search and extraction are disabled.
 
-For details on setting up the memory agent server, model selection,
-and tuning, see [doc/MEMORY.md](doc/MEMORY.md).
+For details on model selection and tuning, see [doc/MEMORY.md](doc/MEMORY.md).
 
 ### Storage
 
@@ -441,14 +383,13 @@ the simplest local setup with OpenAI-compatible API and tool calling.
 The LLM integration is implemented as:
 
 - **`lib/llm/`** -- Self-contained library (`libllm.a`) with the API client,
-  tool system, agentic loop, memory store, and memory agent. Adapted from
-  [llmsh](lib/llm/llmsh-upstream/README.md) (upstream source preserved for
-  reference).
+  tool system, agentic loop, side agent framework, and memory system.
   - `llm_api.c` -- Main agent: curl/SSE streaming, tool call parsing
-  - `llm_memory.c` -- Memory store: save, search, whisper, forget
-  - `llm_mem_api.c` -- Memory agent API: separate curl client with own connection
-  - `llm_mem_agent.c` -- Two-pass extraction: fast extract + thinking cleanup
-  - `llm_shell.c` -- Agentic loop + background fork for memory agent
+  - `llm_side_agent.c` -- Side agent framework: registry, fork/pipe/select, double-fork
+  - `llm_global_mem_agent.c` -- Global memory agent: search, extraction, cleanup
+  - `llm_global_mem_api.c` -- Memory agent LLM client (separate curl connection)
+  - `llm_memory.c` -- Memory store (private to global memory agent)
+  - `llm_shell.c` -- Agentic loop, side agent integration
 - **`builtins/llm.def`**, **`llm_init.def`**, **`llm_config.def`** -- Thin
   bash builtin wrappers that bridge bash's `WORD_LIST` interface to the
   library's string-based API.

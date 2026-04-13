@@ -4,7 +4,7 @@
 #include <time.h>
 #include <curl/curl.h>
 
-#include "llm_mem_api.h"
+#include "llm_global_mem_api.h"
 #include "llm_log.h"
 #include "cJSON.h"
 
@@ -13,7 +13,7 @@ static char *g_mem_api_url = NULL;
 static char *g_mem_model   = NULL;
 static char *g_mem_api_key = NULL;
 
-int llm_mem_api_init(const char *api_url, const char *model, const char *api_key)
+int llm_global_mem_api_init(const char *api_url, const char *model, const char *api_key)
 {
     free(g_mem_api_url);
     free(g_mem_model);
@@ -24,7 +24,7 @@ int llm_mem_api_init(const char *api_url, const char *model, const char *api_key
     return 0;
 }
 
-void llm_mem_api_cleanup(void)
+void llm_global_mem_api_cleanup(void)
 {
     free(g_mem_api_url);  g_mem_api_url = NULL;
     free(g_mem_model);    g_mem_model = NULL;
@@ -50,8 +50,8 @@ static size_t mem_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
     return total;
 }
 
-char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
-                       int enable_thinking, const char *log_caller)
+char *llm_global_mem_api_chat(const char *system_prompt, const char *user_message,
+                              int enable_thinking, const char *log_caller)
 {
     if (!g_mem_api_url || !g_mem_model) return NULL;
 
@@ -124,14 +124,14 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        llm_log_api_call(log_caller ? log_caller : "mem_agent", body, "(curl error)", elapsed_ms);
+        llm_log_api_call(log_caller ? log_caller : "global_mem_agent", body, "(curl error)", elapsed_ms);
         free(body);
         free(response.data);
         return NULL;
     }
 
     /* Log request/response */
-    llm_log_api_call(log_caller ? log_caller : "mem_agent", body, response.data, elapsed_ms);
+    llm_log_api_call(log_caller ? log_caller : "global_mem_agent", body, response.data, elapsed_ms);
     free(body);
 
     /* Parse response -- extract content string */
@@ -139,7 +139,7 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
     cJSON *json = cJSON_Parse(response.data);
     if (json) {
         cJSON *choices = cJSON_GetObjectItem(json, "choices");
-        cJSON *choice0 = cJSON_GetArrayItem(choices, 0);
+        cJSON *choice0 = choices ? cJSON_GetArrayItem(choices, 0) : NULL;
         cJSON *message = choice0 ? cJSON_GetObjectItem(choice0, "message") : NULL;
         if (message) {
             cJSON *content = cJSON_GetObjectItem(message, "content");

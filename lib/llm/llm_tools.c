@@ -8,7 +8,6 @@
 #include <fcntl.h>
 
 #include "llm_tools.h"
-#include "llm_memory.h"
 #include "llm_manscan.h"
 #include "llm_streams.h"
 #include "llm_config.h"
@@ -29,9 +28,9 @@ static llm_builtin_t builtins[] = {
     {"write_file", llm_tool_write_file, SAFETY_CONFIRM, "Write content to file"},
     {"man",        llm_tool_man,        SAFETY_AUTO,    "Get detailed man page info"},
     {"rm",         llm_tool_rm,         SAFETY_DANGER,  "Remove files"},
-    /* All memory tools removed -- whisper agent handles memory retrieval,
-       background agent handles saving/cleanup. User commands (llm remember,
-       llm forget, llm memories) still work directly via the builtin. */
+    /* All memory tools removed -- global memory side agent handles retrieval
+       and saving/cleanup. User commands (llm remember, llm forget, llm memories)
+       still work directly via the builtin. */
     {NULL, NULL, 0, NULL}
 };
 

@@ -28,13 +28,6 @@ char *llm_memory_search(const char *query);
 char *llm_memory_list(void);
 int llm_memory_count(void);
 
-/*
- * Whisper: search memories relevant to query, return formatted text
- * suitable for injection into the system prompt. Returns NULL if no
- * relevant memories found. Caller frees.
- */
-char *llm_memory_whisper(const char *query);
-
 /* Tool handlers (JSON in, malloced string out) */
 char *llm_memory_tool_save(const char *args_json);
 char *llm_memory_tool_search(const char *args_json);

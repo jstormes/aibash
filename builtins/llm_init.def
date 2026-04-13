@@ -86,8 +86,8 @@ extern int evalstring (char *, const char *, int);
 #include "../lib/llm/llm_shell.h"
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
-#include "../lib/llm/llm_memory.h"
-#include "../lib/llm/llm_mem_agent.h"
+#include "../lib/llm/llm_global_mem_agent.h"
+#include "../lib/llm/llm_side_agent.h"
 #include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
@@ -149,13 +149,17 @@ llm_init_builtin (WORD_LIST *list)
     llm_tools_init();
     llm_router_init(g_servers);
 
-    /* Initialize long-term memory */
+    /* Initialize global memory agent (owns the memory store) */
     int mem_count = 0;
     if (g_servers->memory_enabled) {
         char memdir[4096];
         const char *home = getenv("HOME");
         snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
-        mem_count = llm_memory_init(memdir, g_servers->memory_max);
+
+        mem_count = llm_global_mem_agent_init(memdir, g_servers->memory_max,
+                                              g_servers->memory_api_url,
+                                              g_servers->memory_model,
+                                              g_servers->memory_api_key);
 
         /* Initialize API logging */
         char logdir[4096];
@@ -163,12 +167,8 @@ llm_init_builtin (WORD_LIST *list)
         llm_log_init(logdir);
     }
 
-    /* Initialize memory agent if configured */
-    if (g_servers->memory_enabled && g_servers->memory_api_url) {
-        llm_mem_agent_init(g_servers->memory_api_url,
-                           g_servers->memory_model,
-                           g_servers->memory_api_key);
-    }
+    /* Initialize side agent framework */
+    side_agent_init();
 
     /* Set up streaming callbacks -- same as llm builtin's ensure_initialized */
     extern void chat_token_cb(const char *token, void *userdata);

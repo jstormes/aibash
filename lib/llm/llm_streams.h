@@ -44,13 +44,13 @@ void stream_man_output(const char *text);
 /* Write API debug info (request/response summaries) */
 void stream_api_output(const char *direction, const char *text);
 
-/* Write memory whisper debug info */
+/* Write memory keyword search debug info */
 void stream_memory_output(const char *text);
 
-/* Write memory agent extraction debug info */
-void stream_mem_agent_output(const char *text);
+/* Write global memory agent debug info */
+void stream_global_mem_agent_output(const char *text);
 
-/* Write whisper agent debug info */
-void stream_whisper_output(const char *text);
+/* Write side agent framework debug info */
+void stream_side_agent_output(const char *name, const char *text);
 
 #endif /* BASH_LLM_STREAMS_H */

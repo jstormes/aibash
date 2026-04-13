@@ -99,18 +99,20 @@ void stream_memory_output(const char *text)
     labeled_write(stderr, "mem", "\033[95m", text, &mem_sol);
 }
 
-static int agent_sol = 1;
+static int global_mem_sol = 1;
 
-void stream_mem_agent_output(const char *text)
+void stream_global_mem_agent_output(const char *text)
 {
     if (!text || !streams_label_mode) return;
-    labeled_write(stderr, "mem-agent", "\033[93m", text, &agent_sol);
+    labeled_write(stderr, "global-mem", "\033[93m", text, &global_mem_sol);
 }
 
-static int whisper_sol = 1;
+static int side_sol = 1;
 
-void stream_whisper_output(const char *text)
+void stream_side_agent_output(const char *name, const char *text)
 {
     if (!text || !streams_label_mode) return;
-    labeled_write(stderr, "mem-whisper", "\033[96m", text, &whisper_sol);
+    char label[64];
+    snprintf(label, sizeof(label), "agent:%s", name);
+    labeled_write(stderr, label, "\033[96m", text, &side_sol);
 }

@@ -2,41 +2,49 @@
 
 The aibash memory system gives the LLM persistent, long-term memory across
 sessions. It stores facts, preferences, and project context that the LLM
-can recall automatically or on demand.
+can recall automatically.
 
 ## Architecture Overview
 
+All memory access goes through the **global memory side agent**. The main
+LLM agent and builtins never access the memory store directly -- the agent
+is the sole owner of memory data.
+
 ```
-┌─────────────────────────────────────────────────────┐
-│                    User Query                        │
-│                                                      │
-│  ┌─────────────────────────────────────┐             │
-│  │ Layer 1: LLM Whisper Agent          │             │
-│  │ (forked, calls memory server)       │             │
-│  │ Sends all memories + query          │             │
-│  │ Returns only DIRECTLY relevant ones │             │
-│  │ (2-5 sec, 5 sec timeout)            │             │
-│  └──────────────┬──────────────────────┘             │
-│                  ▼                                    │
-│       [memory context] injected                      │
-│       into system prompt (precise, minimal tokens)   │
-│                  │                                    │
-│                  ▼                                    │
-│       Main Agent (ai server)                         │
-│       responds to user                               │
-│                  │                                    │
-│                  ▼                                    │
-│  ┌─────────────────────────────────────┐             │
-│  │ Layer 2: Background Memory Agent    │             │
-│  │ (forked, user doesn't wait)         │             │
-│  │                                     │             │
-│  │ Pass 1: Extract facts (thinking off)│             │
-│  │ Pass 2: Cleanup (thinking on)       │             │
-│  │   - Split compound entries          │             │
-│  │   - Resolve conflicts               │             │
-│  │   - Remove duplicates               │             │
-│  └─────────────────────────────────────┘             │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                    User Query                         │
+│                                                       │
+│  ┌──────────────────────────────────────┐             │
+│  │ Side Agent Framework                 │             │
+│  │                                      │             │
+│  │ PRE-QUERY: Global Memory Agent       │             │
+│  │  (forked child, calls memory LLM)    │             │
+│  │  Sends all memories + query          │             │
+│  │  Returns only DIRECTLY relevant ones │             │
+│  │  (2-5 sec, 5 sec timeout)            │             │
+│  └──────────────┬───────────────────────┘             │
+│                  ▼                                     │
+│       [global_memory context] injected                │
+│       into system prompt                              │
+│                  │                                     │
+│                  ▼                                     │
+│       Main Agent (ai server)                          │
+│       responds to user (no memory access)             │
+│                  │                                     │
+│                  ▼                                     │
+│  ┌──────────────────────────────────────┐             │
+│  │ Side Agent Framework                 │             │
+│  │                                      │             │
+│  │ POST-QUERY: Global Memory Agent      │             │
+│  │  (double-forked, user doesn't wait)  │             │
+│  │                                      │             │
+│  │  Pass 1: Extract facts (thinking off)│             │
+│  │  Pass 2: Cleanup (thinking on)       │             │
+│  │    - Split compound entries          │             │
+│  │    - Resolve conflicts               │             │
+│  │    - Remove duplicates               │             │
+│  └──────────────────────────────────────┘             │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## Quick Setup
@@ -57,14 +65,14 @@ llama-server -m Qwen3.5-4B-UD-Q6_K_XL.gguf \
   -ngl 999 \
   -c 131072 \
   --temp 0.7 \
-  -np 2 \
+  -np 1 \
   -fa on \
   --cache-type-k q8_0 \
   --cache-type-v q8_0
 ```
 
 Key flags:
-- `-np 2` -- two parallel slots (needed for parallel whisper agents)
+- `-np 1` -- one parallel slot (sufficient for side agent)
 - `-c 131072` -- large context for cleanup pass with many memories
 - `-ngl 999` -- offload to GPU if available
 
@@ -93,43 +101,47 @@ model = Qwen3.5-122B
 
 ```bash
 ./aibash
-LLM initialized: ai (Qwen3.5-122B), 2762 man pages, 4 memories
+LLM initialized: ai (Qwen3.5-122B), 2762 man pages, 10 memories
 ```
 
 ## How Memory Works
 
+### Separation of Concerns
+
+The memory system enforces a strict boundary:
+
+- **Global memory agent** (`llm_global_mem_agent.c`): Sole owner of the
+  memory store. Handles all reads, writes, searches, and cleanup.
+- **Side agent framework** (`llm_side_agent.c`): Manages fork/pipe/select
+  plumbing for pre-query and post-query callbacks.
+- **Main agent** (`llm_api.c`): Only receives injected `[global_memory context]`
+  blocks. Has no memory tools and cannot access memory data.
+- **Builtins** (`llm.def`): User commands (`remember`, `forget`, `memories`)
+  call the agent's public API, never the storage layer directly.
+
 ### Saving Memories
 
-Memories are saved three ways:
-
-**1. Explicit command** (instant, no LLM):
+**1. Explicit command** (instant, through agent API):
 ```bash
 llm remember I prefer Python for scripting
 llm remember This project uses PostgreSQL 16 on port 5432
 ```
 
-**2. Main agent tool call** (during conversation):
-The main LLM has a `memory_save` tool and will proactively save facts
-when the user shares important information.
-
-**3. Background extraction** (automatic, after each conversation):
-The memory agent analyzes the conversation and extracts facts worth
-remembering. This happens in a forked background process -- the user
-never waits.
+**2. Background extraction** (automatic, after each conversation):
+The post-query side agent analyzes the conversation and extracts facts
+worth remembering. This happens in a double-forked background process --
+the user never waits.
 
 ### Recalling Memories
 
-**Automatic whisper injection:** Before each query, memories are
-searched and relevant ones are injected into the system prompt. The
-LLM sees this context and can use it to give better answers.
-
-**Explicit search:** The main LLM can call `memory_search` to look
-up specific memories during the agentic loop.
+**Automatic context injection:** Before each query, the pre-query side
+agent searches memories via LLM and injects relevant ones into the system
+prompt as a `[global_memory context]` block.
 
 **User commands:**
 ```bash
 llm memories               # list all saved memories
-llm cleanup                # manually run cleanup (split, deduplicate, resolve tombstones)
+llm cleanup                # manually run cleanup (split, deduplicate, resolve)
 llm_config --memories      # show memory stats
 ```
 
@@ -141,36 +153,13 @@ llm forget 5
 
 # By keyword (case-insensitive substring match)
 llm forget python
-
-# Natural language (main agent searches and deletes)
-llm please forget everything about my editor preference
 ```
-
-**Safety guardrails:** The `memory_forget` LLM tool requires user
-confirmation before deleting (safety tier: Confirm). The system prompt
-instructs the LLM to never delete memories unless explicitly asked, and
-to limit itself to one tool call per user request. This prevents the
-agent from mass-deleting memories during normal operation.
 
 ### Conflict Resolution
 
-When new information contradicts existing memories:
-
-1. The **background memory agent** detects conflicts during the cleanup
-   pass (thinking mode ON) and replaces outdated entries
-2. The **main agent** can use `memory_forget` + `memory_save` to update
-   facts in real-time when the user corrects something
-
-Example:
-```
-$ llm I use neovim as my editor
-# → memory saved: "User uses neovim as editor"
-
-$ llm actually I switched to helix
-# → memory agent cleanup pass:
-#   - Deletes "User uses neovim as editor"
-#   - Saves "User uses helix as editor"
-```
+When new information contradicts existing memories, the background
+extraction agent detects conflicts during the cleanup pass (thinking
+mode ON) and replaces outdated entries automatically.
 
 ### Tombstone Mechanism
 
@@ -180,77 +169,80 @@ When a memory is deleted, a tombstone marker is saved:
 DELETED: User wants to forget: I use helix as my editor
 ```
 
-Tombstones solve a race condition: the background memory agent runs
-in a forked process and may re-save a fact that the user already
-deleted. When the cleanup pass (thinking ON) runs, it sees the
-tombstone, removes any conflicting re-saved memories, and removes
-the tombstone itself.
+Tombstones solve a race condition: the background agent runs in a forked
+process and may re-save a fact that the user already deleted. When the
+cleanup pass runs, it sees the tombstone, removes conflicting re-saved
+memories, and removes the tombstone itself.
 
-Tombstones are:
-- **Hidden** from `llm memories` and `memory_list`
-- **Excluded** from whisper injection and `memory_search`
-- **Visible** to the cleanup pass for conflict resolution
-- **Self-cleaning** -- the cleanup pass removes them after resolving
+## Pre-Query Search
 
-## Whisper Layers in Detail
-
-### Layer 1: LLM Whisper Agent
-
-- **Speed:** 2-5 seconds
-- **Method:** Forked LLM agent on memory server semantically matches
-  memories to the query
-- **When:** Every query (if memory agent is configured)
-- **Timeout:** 5 seconds -- if agent doesn't respond, query proceeds without
-- **Slots required:** 1
-
-The whisper agent receives all memories plus the user's query and
-returns only the memories that DIRECTLY answer or relate to the
-specific question. The prompt instructs the model to be strict --
-only include memories the user would need to answer this exact
-question, not loosely related ones.
+The pre-query callback forks a child process that:
+1. Sends all memories + the user's query to the memory LLM
+2. The LLM returns only memories that DIRECTLY relate to the query
+3. Results are piped back to the parent (5-second timeout)
+4. Injected into the system prompt as `[global_memory context]`
 
 This produces precise, context-efficient results:
 
-| Query | Whispered | Not whispered |
-|-------|-----------|---------------|
+| Query | Injected | Not injected |
+|-------|----------|--------------|
 | "what database do I use" | MySQL only | Docker, Python, AWS, family |
 | "tell me about my family" | wife, kids, name | ice cream, tech stack |
-| "describe my tech stack" | all tech memories | family, ice cream |
 | "what's the weather" | NONE | everything |
 
-**Context conservation:** The LLM agent typically injects fewer, more
-relevant memories than keyword search would. A specific query like
-"what database" injects ~15 tokens instead of ~150. This leaves more
-context window for the actual conversation.
+In debug mode:
+```
+$ llm_config --labels
+$ llm what database do I use
+[global-mem] searching memories...
+[global-mem] - The project database is MySQL
+```
 
-Note: keyword search with stemming and stop word filtering is still
-available in the `memory_search` tool for the main agent to use
-during the agentic loop, but is no longer used for whisper injection.
+## Post-Query Extraction
 
-### Layer 2: Background Extraction
-
-- **Speed:** 5-30 seconds (user doesn't wait)
-- **Method:** Double-fork background process, two-pass LLM analysis
-- **When:** After every conversation exchange
+The post-query callback double-forks a grandchild that:
 
 **Pass 1 (thinking off):** Quick extraction of obvious facts.
 Temperature 0.1 for deterministic output.
 
 **Pass 2 (thinking on):** Reviews all memories with reasoning:
 - Splits compound entries into individual facts
-- Detects and resolves conflicts via `replaces`
+- Detects and resolves conflicts
 - Removes duplicates
-- Handles forget requests via `forget`
+
+Both passes run in the background -- the user is already back at their prompt.
+
+## Side Agent Framework
+
+The memory system uses the generic side agent framework. Each side agent
+registers callbacks:
+
+```c
+side_agent_register(&(side_agent_t){
+    .name        = "global_memory",
+    .timeout_sec = 5,
+    .enabled     = 1,
+    .pre_query   = global_mem_agent_pre_query_cb,
+    .post_query  = global_mem_agent_post_query_cb,
+});
+```
+
+The framework handles:
+- Parallel fork/pipe/select for pre-query agents
+- Double-fork for post-query agents
+- Timeout management and child reaping
+- Result wrapping in `[name context]...[end name context]` blocks
+
+New side agents (e.g., local directory memory, cron reminders) can be
+added by writing callbacks and registering them.
 
 ## Model Selection
 
 ### Memory agent model requirements
 
-The memory agent model needs:
-- **Tool-free operation** -- it just returns JSON text, no function calling
 - **Instruction following** -- must output valid JSON arrays reliably
 - **Thinking capability** -- for the cleanup pass (Pass 2)
-- **Speed on CPU** -- extraction happens after every query
+- **Speed** -- extraction happens after every query
 
 ### Recommended models
 
@@ -259,19 +251,6 @@ The memory agent model needs:
 | **Qwen3.5-4B** | Q6_K | 3.5GB | Yes | Recommended -- best balance |
 | **Qwen3.5-4B** | Q8_0 | 4.5GB | Yes | Higher quality, slightly slower |
 | Qwen3-4B-Instruct-2507 | Q8_0 | 4.0GB | No | Good extraction, weaker cleanup |
-| Qwen3.5-9B | Q6_K | 6.5GB | Yes | Better quality but slower |
-
-**Qwen3.5-4B Q6 is recommended** because:
-- Thinking mode enables the cleanup pass to reason through conflicts
-- Small enough for CPU inference with reasonable speed
-- 262K native context supports large memory stores
-- Temperature 0.1 produces reliable JSON output
-
-### Models NOT recommended
-
-- **Qwen3.5-9B Q8** -- too large for most memory agent servers (9GB RAM)
-- **Models without thinking** -- cleanup pass produces worse results
-- **Models >9B** -- diminishing returns for extraction; speed matters more
 
 ## Server Configuration
 
@@ -279,24 +258,7 @@ The memory agent model needs:
 
 - CPU: 4+ cores (8 recommended)
 - RAM: 8GB (for 4B model + context)
-- GPU: Optional (iGPU helps, discrete not needed)
-- Disk: 10GB for model files
-
-### llama-server flags explained
-
-```bash
-llama-server \
-  -m model.gguf \
-  --port 8080 \
-  -np 2 \              # 2 parallel slots for whisper agents
-  -c 131072 \          # context length (increase for more memories)
-  -ngl 999 \           # GPU layers (all if GPU available)
-  -fa on \             # flash attention (faster)
-  --cache-type-k q8_0 \  # quantized KV cache (saves memory)
-  --cache-type-v q8_0 \
-  --temp 0.7 \         # server default (overridden per-request)
-  -t 8 -tb 16          # threads (match your CPU cores)
-```
+- GPU: Optional (iGPU helps)
 
 ### Context length vs memory capacity
 
@@ -307,49 +269,16 @@ llama-server \
 | 131072 | ~1000 | High |
 | 262144 | ~2000-3000 | Very high |
 
-The cleanup pass sends all memories to the model. Increase `-c` to
-support more memories, but this increases RAM usage for KV cache.
-
-## Tuning
-
-### Temperature
-
-The memory agent sends `temperature: 0.1` in all API requests,
-overriding the server default. This ensures deterministic, reliable
-JSON output. The server's `--temp` flag only affects requests that
-don't specify temperature.
-
-### Thinking mode
-
-- **Pass 1 (extraction):** Thinking OFF -- fast, direct JSON output
-- **Pass 2 (cleanup):** Thinking ON -- model reasons through conflicts
-- **Whisper agents:** Thinking OFF -- speed matters for user-facing latency
-
-Thinking is controlled per-request via `chat_template_kwargs.enable_thinking`.
-The server doesn't need any special configuration for this.
-
-### Memory max
-
-```ini
-[settings]
-memory_max = 200    # default
-```
-
-Increase if you have a large context length configured. The oldest
-memories are evicted (FIFO) when the limit is reached.
-
 ## Debug Mode
 
-Enable labels to see memory system activity:
+Enable labels to see memory agent activity:
 
 ```bash
 llm_config --labels     # or --debug for API-level info
 ```
 
 Labels:
-- `[mem]` -- keyword search whisper results (Layer 1)
-- `[mem-whisper]` -- parallel agent whisper results (Layer 2)
-- `[mem-agent]` -- background extraction activity (Layer 3)
+- `[global-mem]` -- memory agent search and extraction activity
 
 ## Files
 
@@ -358,18 +287,16 @@ Labels:
 | `~/.bashllmrc` | Configuration (servers, settings, [memory] section) |
 | `~/.aibash_memories/` | Memory storage directory |
 | `~/.aibash_memories/memories.json` | All saved memories (JSON array) |
-| `~/.aibash_llm_history` | Conversation history (separate from memories) |
+| `~/.aibash_memories/logs/` | API call logs (auto-cleaned after 24h) |
 
-### Memory entry format
+### Source files
 
-```json
-{
-  "id": 1,
-  "content": "User prefers Python for scripting",
-  "keywords": "user,prefers,python,scripting",
-  "created": "2026-04-09T00:30:00Z"
-}
-```
+| File | Description |
+|------|-------------|
+| `lib/llm/llm_side_agent.c/.h` | Side agent framework (generic) |
+| `lib/llm/llm_global_mem_agent.c/.h` | Global memory agent (owns memory store) |
+| `lib/llm/llm_global_mem_api.c/.h` | Memory agent LLM client |
+| `lib/llm/llm_memory.c/.h` | Memory store (private to agent) |
 
 ## Troubleshooting
 
@@ -378,23 +305,17 @@ Labels:
 - Verify the memory server is running: `curl http://ai3:8080/v1/models`
 - Check `memory = 1` in `[settings]`
 
-**Whisper agents timing out:**
+**Memory search timing out:**
 - Memory server may be overloaded or slow
-- Check `-np 2` is set (need 2 parallel slots)
-- Increase timeout by rebuilding (WHISPER_TIMEOUT_SEC in llm_whisper.c)
+- Default timeout is 5 seconds (SIDE_AGENT_DEFAULT_TIMEOUT)
+- Check server logs for errors
 
 **Memories not splitting:**
 - The cleanup pass (thinking ON) handles splitting
-- Ensure the model supports thinking mode (Qwen3.5 does, Qwen3-Instruct does not)
-- Check the server isn't running with `--chat-template-kwargs '{"enable_thinking":false}'`
-
-**Conflicts not resolved:**
-- Run `llm cleanup` to manually trigger the cleanup pass
-- The 4B model resolves conflicts well but not perfectly
-- Manual cleanup: `llm memories` to see all, `llm forget <id>` to remove stale ones
-- Natural language: `llm please forget everything about <topic>`
+- Ensure the model supports thinking mode (Qwen3.5 does)
+- Run `llm cleanup` to trigger manually
 
 **Too many memories / slow cleanup:**
 - Reduce `memory_max` in config
-- Ensure server context (`-c`) is large enough for your memory count
+- Ensure server context (`-c`) is large enough
 - The cleanup pass scales linearly with memory count

@@ -7,9 +7,7 @@
 
 #include "llm_api.h"
 #include "llm_history.h"
-#include "llm_memory.h"
-#include "llm_whisper.h"
-#include "llm_mem_agent.h"
+#include "llm_side_agent.h"
 #include "llm_log.h"
 #include "llm_config.h"
 #include "llm_streams.h"
@@ -81,8 +79,8 @@ static const char *SYSTEM_PROMPT =
     "- Use the 'man' tool when you need specific flags, options, or usage details.\n"
     "- Prefer 'man' over guessing flags -- it returns accurate system documentation.\n\n"
     "Long-term memory:\n"
-    "- If a [memory context] block is present above, it contains facts about the\n"
-    "  user from previous sessions. Use this context to give better answers.\n"
+    "- If a [global_memory context] block is present above, it contains facts\n"
+    "  about the user from previous sessions. Use this context to give better answers.\n"
     "- Memory is managed automatically -- you do not need to save or delete memories.\n"
     "- If the user asks to remember or forget something, tell them to use the\n"
     "  'llm remember' or 'llm forget' shell commands directly.";
@@ -168,14 +166,17 @@ static char *build_system_prompt(const char *cwd, const char *last_output,
 
     (void)last_output;
 
-    /* Inject whispered memories via LLM agent */
-    if (query && llm_mem_agent_ready()) {
-        char *whisper = llm_whisper_agents(query);
-        if (whisper) {
-            off += snprintf(sys_buf + off, sys_len - off,
-                "\n[memory context from long-term memory]\n%s"
-                "[end memory context]\n", whisper);
-            free(whisper);
+    /* Inject context from pre-query side agents */
+    if (query) {
+        char *pre_ctx = side_agents_pre_query(query, cwd);
+        if (pre_ctx) {
+            size_t ctx_len = strlen(pre_ctx);
+            if ((size_t)off + ctx_len + 2 > sys_len) {
+                sys_len = off + ctx_len + 256;
+                sys_buf = realloc(sys_buf, sys_len);
+            }
+            off += snprintf(sys_buf + off, sys_len - off, "\n%s", pre_ctx);
+            free(pre_ctx);
         }
     }
 

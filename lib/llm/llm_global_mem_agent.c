@@ -1,14 +1,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "llm_mem_agent.h"
-#include "llm_mem_api.h"
+#include "llm_global_mem_agent.h"
+#include "llm_global_mem_api.h"
 #include "llm_memory.h"
 #include "llm_streams.h"
+#include "llm_serverconf.h"
 #include "cJSON.h"
 
-static int g_agent_ready = 0;
+static int g_agent_ready = 0;    /* LLM available for search/extract */
+static int g_store_ready = 0;    /* memory store initialized */
+static char g_memory_dir[4096];  /* path to memory directory */
+static int g_memory_max = 200;   /* max entries */
+
+/* ---- Memory search prompt ---- */
+
+static const char *SEARCH_PROMPT =
+    "Given the user's memories below, which ones DIRECTLY answer or relate "
+    "to their specific query? Be strict -- only include memories that the "
+    "user would need to answer this exact question. Do not include loosely "
+    "related or tangential memories.\n\n"
+    "Return ONLY the relevant memories as bullet points (- memory text).\n"
+    "If none are directly relevant, return exactly: NONE\n"
+    "No explanation, no markdown, just bullet points or NONE.";
 
 /* ---- Pass 1: Fast extraction (thinking OFF) ---- */
 
@@ -55,26 +71,73 @@ static const char *CLEANUP_PROMPT =
 
 /* ---- Init/cleanup ---- */
 
-int llm_mem_agent_init(const char *api_url, const char *model, const char *api_key)
+int llm_global_mem_agent_init(const char *memory_dir, int memory_max,
+                              const char *api_url, const char *model,
+                              const char *api_key)
 {
-    if (!api_url) return -1;
-    llm_mem_api_init(api_url, model, api_key);
-    g_agent_ready = 1;
-    return 0;
+    /* Initialize the memory store (always, even without LLM) */
+    if (memory_dir) {
+        snprintf(g_memory_dir, sizeof(g_memory_dir), "%s", memory_dir);
+        g_memory_max = memory_max;
+        int count = llm_memory_init(memory_dir, memory_max);
+        g_store_ready = 1;
+
+        /* Initialize the agent LLM connection (optional) */
+        if (api_url) {
+            llm_global_mem_api_init(api_url, model, api_key);
+            g_agent_ready = 1;
+        }
+
+        return count;
+    }
+    return -1;
 }
 
-void llm_mem_agent_cleanup(void)
+void llm_global_mem_agent_cleanup(void)
 {
-    llm_mem_api_cleanup();
+    llm_memory_cleanup();
+    llm_global_mem_api_cleanup();
     g_agent_ready = 0;
+    g_store_ready = 0;
 }
 
-int llm_mem_agent_ready(void)
+int llm_global_mem_agent_ready(void)
 {
     return g_agent_ready;
 }
 
-/* ---- Helpers ---- */
+int llm_global_mem_agent_count(void)
+{
+    return g_store_ready ? llm_memory_count() : 0;
+}
+
+/* ---- User-facing memory commands ---- */
+
+int llm_global_mem_remember(const char *text)
+{
+    if (!g_store_ready || !text) return -1;
+    return llm_memory_save(text, NULL);
+}
+
+int llm_global_mem_forget(int id)
+{
+    if (!g_store_ready) return -1;
+    return llm_memory_forget(id);
+}
+
+int llm_global_mem_forget_match(const char *text)
+{
+    if (!g_store_ready || !text) return -1;
+    return llm_memory_forget_match(text);
+}
+
+char *llm_global_mem_list(void)
+{
+    if (!g_store_ready) return strdup("(memory not initialized)");
+    return llm_memory_list();
+}
+
+/* ---- Internal helpers ---- */
 
 static char *build_prompt_with_memories(const char *prefix, const char *body)
 {
@@ -145,7 +208,7 @@ static int apply_operations(const char *json_text)
 
             char dbg[512];
             snprintf(dbg, sizeof(dbg), "cleanup: %s\n", j_add->valuestring);
-            stream_mem_agent_output(dbg);
+            stream_global_mem_agent_output(dbg);
             continue;
         }
 
@@ -164,7 +227,7 @@ static int apply_operations(const char *json_text)
 
             char dbg[512];
             snprintf(dbg, sizeof(dbg), "extracted: %s\n", j_content->valuestring);
-            stream_mem_agent_output(dbg);
+            stream_global_mem_agent_output(dbg);
             continue;
         }
     }
@@ -173,25 +236,83 @@ static int apply_operations(const char *json_text)
     return ops;
 }
 
-/* ---- Main extraction entry point ---- */
+/* ---- Memory search helpers ---- */
 
-void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int memory_max)
+static char *build_search_message(const char *query)
 {
-    if (!g_agent_ready || !conversation || !conversation[0]) return;
+    char *mem_list = llm_memory_list();
+    if (!mem_list || strcmp(mem_list, "(no memories saved)") == 0) {
+        free(mem_list);
+        return NULL;
+    }
 
-    /*
-     * We're in a forked child process. Reinitialize the memory store
-     * from disk since we have a copy-on-write snapshot of the parent.
-     */
-    llm_memory_init(memory_dir, memory_max);
+    size_t len = strlen(query) + strlen(mem_list) + 64;
+    char *msg = malloc(len);
+    snprintf(msg, len, "Query: %s\n\nMemories:\n%s", query, mem_list);
+    free(mem_list);
+    return msg;
+}
 
+static int is_empty_response(const char *text)
+{
+    if (!text || !text[0]) return 1;
+
+    const char *p = text;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+
+    if (*p == '\0') return 1;
+    if (strncasecmp(p, "NONE", 4) == 0) return 1;
+
+    return 0;
+}
+
+/* ---- Side agent callbacks ---- */
+
+char *global_mem_agent_pre_query_cb(const char *query, const char *cwd)
+{
+    (void)cwd;
+    if (!query || !query[0]) return NULL;
+
+    char *agent_msg = build_search_message(query);
+    if (!agent_msg) return NULL;
+
+    stream_global_mem_agent_output("searching memories...\n");
+
+    char *result = llm_global_mem_api_chat(SEARCH_PROMPT, agent_msg, 0, "mem-search");
+    free(agent_msg);
+
+    if (is_empty_response(result)) {
+        free(result);
+        return NULL;
+    }
+
+    stream_global_mem_agent_output(result);
+    return result;
+}
+
+void global_mem_agent_post_query_cb(const char *query, const char *response, const char *cwd)
+{
+    (void)cwd;
+    if (!g_agent_ready) return;
+
+    size_t conv_len = strlen(query) + strlen(response) + 64;
+    char *conversation = malloc(conv_len);
+    snprintf(conversation, conv_len, "User: %s\nAssistant: %s", query, response);
+
+    llm_global_mem_agent_extract(conversation);
+    free(conversation);
+}
+
+/* ---- Extraction (runs in forked child) ---- */
+
+static void run_extraction(const char *conversation)
+{
     /*
      * PASS 1: Fast extraction (thinking OFF)
-     * Quick scan of the conversation, extract obvious facts.
      */
     {
         char *prompt = build_prompt_with_memories("Conversation:\n", conversation);
-        char *response = llm_mem_api_chat(EXTRACT_PROMPT, prompt, 0, "extract");
+        char *response = llm_global_mem_api_chat(EXTRACT_PROMPT, prompt, 0, "extract");
         free(prompt);
 
         if (response) {
@@ -202,19 +323,15 @@ void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int
 
     /*
      * PASS 2: Cleanup (thinking ON)
-     * Reload memories (pass 1 may have added new ones), then ask the
-     * model to split compound entries, resolve conflicts, remove dupes.
-     * Thinking mode lets it reason through the logic step by step.
+     * Reload memories (pass 1 may have added new ones).
      */
     {
-        /* Reload from disk to see pass 1 results */
         llm_memory_cleanup();
-        llm_memory_init(memory_dir, memory_max);
+        llm_memory_init(g_memory_dir, g_memory_max);
 
-        /* Only run cleanup if there are memories to clean */
         if (llm_memory_count() > 1) {
             char *prompt = build_prompt_with_memories(NULL, NULL);
-            char *response = llm_mem_api_chat(CLEANUP_PROMPT, prompt, 1, "cleanup");
+            char *response = llm_global_mem_api_chat(CLEANUP_PROMPT, prompt, 1, "cleanup");
             free(prompt);
 
             if (response) {
@@ -223,4 +340,26 @@ void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int
             }
         }
     }
+}
+
+void llm_global_mem_agent_extract(const char *conversation)
+{
+    if (!g_agent_ready || !conversation || !conversation[0]) return;
+
+    /*
+     * We're in a forked child process. Reinitialize the memory store
+     * from disk since we have a copy-on-write snapshot of the parent.
+     */
+    llm_memory_cleanup();
+    llm_memory_init(g_memory_dir, g_memory_max);
+
+    run_extraction(conversation);
+}
+
+void llm_global_mem_agent_cleanup_run(int memory_max)
+{
+    if (!g_agent_ready) return;
+
+    /* Run extraction with a cleanup trigger (no real conversation) */
+    llm_global_mem_agent_extract("(cleanup requested by user)");
 }

@@ -30,7 +30,6 @@
 
 /* Memory */
 #define BASH_LLM_MEMORY_MAX         1500   /* max memory entries (fits 262K context) */
-#define BASH_LLM_MEMORY_WHISPER_MAX 2000   /* max chars in whisper text */
 
 /* Max servers in config */
 #define BASH_LLM_MAX_SERVERS 16

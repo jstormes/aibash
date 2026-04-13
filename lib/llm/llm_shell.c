@@ -3,13 +3,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/wait.h>
 
 #include "llm_shell.h"
 #include "llm_api.h"
 #include "llm_router.h"
 #include "llm_history.h"
-#include "llm_mem_agent.h"
+#include "llm_side_agent.h"
 #include "llm_streams.h"
 #include "cJSON.h"
 
@@ -112,40 +111,6 @@ char *llm_shell_agentic_loop(llm_shell_ctx_t *ctx, llm_response_t *resp)
     return final_text;
 }
 
-/* ---- Background memory extraction via double-fork ---- */
-
-static void background_extract(const char *conversation,
-                                const char *memory_dir, int memory_max)
-{
-    /*
-     * Double-fork to avoid zombies:
-     * Parent -> Child (exits immediately) -> Grandchild (does work, reaped by init)
-     */
-    fflush(stdout);
-    fflush(stderr);
-
-    pid_t pid = fork();
-    if (pid < 0) return;        /* fork failed */
-
-    if (pid > 0) {
-        /* Parent: reap the immediate child */
-        waitpid(pid, NULL, 0);
-        return;
-    }
-
-    /* Child: fork again and exit */
-    pid_t pid2 = fork();
-    if (pid2 > 0) _exit(0);     /* child exits, parent reaps it */
-    if (pid2 < 0) _exit(1);     /* fork failed */
-
-    /* Grandchild: do the actual extraction work */
-    /* Close stdin to avoid interfering with terminal */
-    close(STDIN_FILENO);
-
-    llm_mem_agent_extract(conversation, memory_dir, memory_max);
-    _exit(0);
-}
-
 /* ---- Query ---- */
 
 char *llm_shell_query(llm_shell_ctx_t *ctx, const char *query, const char *context)
@@ -179,22 +144,9 @@ char *llm_shell_query(llm_shell_ctx_t *ctx, const char *query, const char *conte
     char *result = llm_shell_agentic_loop(ctx, resp);
     streams_llm_active = 0;
 
-    /* Background memory extraction if agent is configured */
-    if (result && llm_mem_agent_ready()) {
-        /* Build conversation text for the memory agent */
-        size_t conv_len = strlen(full_query) + strlen(result) + 64;
-        char *conversation = malloc(conv_len);
-        snprintf(conversation, conv_len,
-                 "User: %s\nAssistant: %s", full_query, result);
-
-        /* Get memory dir from HOME */
-        const char *home = getenv("HOME");
-        char memdir[4096];
-        snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
-
-        background_extract(conversation, memdir,
-                           ctx->servers ? ctx->servers->memory_max : 200);
-        free(conversation);
+    /* Run post-query side agents (global memory extraction, etc.) */
+    if (result) {
+        side_agents_post_query(full_query, result, cwd);
     }
 
     free(full_query);
