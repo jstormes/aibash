@@ -30,7 +30,7 @@ static llm_builtin_t builtins[] = {
     {"man",        llm_tool_man,        SAFETY_AUTO,    "Get detailed man page info"},
     {"rm",         llm_tool_rm,         SAFETY_DANGER,  "Remove files"},
     {"memory_save",   llm_memory_tool_save,   SAFETY_AUTO, "Save to long-term memory"},
-    {"memory_search", llm_memory_tool_search, SAFETY_AUTO, "Search long-term memories"},
+    /* memory_search removed -- whisper agent handles memory retrieval */
     {"memory_list",   llm_memory_tool_list,   SAFETY_AUTO, "List all memories"},
     {"memory_forget", llm_memory_tool_forget, SAFETY_CONFIRM, "Forget a memory"},
     {NULL, NULL, 0, NULL}
