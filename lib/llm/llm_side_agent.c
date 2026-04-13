@@ -10,6 +10,7 @@
 
 #include "llm_side_agent.h"
 #include "llm_global_mem_agent.h"
+#include "llm_cron_agent.h"
 #include "llm_streams.h"
 
 /* ---- Registry ---- */
@@ -39,9 +40,10 @@ char *side_agents_pre_query(const char *query, const char *cwd)
 {
     if (!query || !query[0]) return NULL;
 
-    /* Collect enabled pre_query agents */
+    /* Phase 1: Create all pipes up front */
     int slots_count = 0;
     pre_query_slot_t slots[SIDE_AGENT_MAX];
+    int write_fds[SIDE_AGENT_MAX];  /* track write-ends for child cleanup */
 
     for (int i = 0; i < g_agent_count; i++) {
         if (!g_agents[i].enabled || !g_agents[i].pre_query)
@@ -50,123 +52,97 @@ char *side_agents_pre_query(const char *query, const char *cwd)
         int pipefd[2];
         if (pipe(pipefd) < 0) continue;
 
+        slots[slots_count].fd = pipefd[0];
+        slots[slots_count].pid = -1;
+        slots[slots_count].agent_idx = i;
+        slots[slots_count].result = NULL;
+        slots[slots_count].done = 0;
+        write_fds[slots_count] = pipefd[1];
+        slots_count++;
+    }
+
+    /* Phase 2: Fork children sequentially — each gets a clean process */
+    for (int s = 0; s < slots_count; s++) {
         pid_t pid = fork();
         if (pid < 0) {
-            close(pipefd[0]);
-            close(pipefd[1]);
+            close(slots[s].fd);
+            close(write_fds[s]);
+            slots[s].done = 1;
             continue;
         }
 
         if (pid == 0) {
-            /* Child process */
-            close(pipefd[0]);
+            /* Child: clean environment for curl */
             close(STDIN_FILENO);
+            close(slots[s].fd);  /* close our read-end */
+            signal(SIGPIPE, SIG_DFL);
+            signal(SIGCHLD, SIG_DFL);
 
-            char *result = g_agents[i].pre_query(query, cwd);
+            int my_fd = write_fds[s];
+            int idx = slots[s].agent_idx;
+            char *result = g_agents[idx].pre_query(query, cwd);
             if (result) {
                 size_t len = strlen(result);
                 size_t written = 0;
                 while (written < len) {
-                    ssize_t n = write(pipefd[1], result + written, len - written);
+                    ssize_t n = write(my_fd, result + written, len - written);
                     if (n <= 0) break;
                     written += n;
                 }
                 free(result);
             }
-            close(pipefd[1]);
+            close(my_fd);
             _exit(0);
         }
 
-        /* Parent */
-        close(pipefd[1]);
-        slots[slots_count].fd = pipefd[0];
-        slots[slots_count].pid = pid;
-        slots[slots_count].agent_idx = i;
-        slots[slots_count].result = NULL;
-        slots[slots_count].done = 0;
-        slots_count++;
+        /* Parent: close this write-end, record pid */
+        close(write_fds[s]);
+        slots[s].pid = pid;
+
+        /*
+         * Wait for this child to finish before forking the next one.
+         * Multiple forked children using libcurl simultaneously hang
+         * due to inherited bash process state (signal handlers, fds).
+         * Serializing the forks avoids this — each agent still runs
+         * in its own process, just not concurrently.
+         */
+        {
+            fd_set rfds;
+            struct timeval wait_tv;
+            int t = g_agents[slots[s].agent_idx].timeout_sec;
+            if (t <= 0) t = SIDE_AGENT_DEFAULT_TIMEOUT;
+            FD_ZERO(&rfds);
+            FD_SET(slots[s].fd, &rfds);
+            wait_tv.tv_sec = t;
+            wait_tv.tv_usec = 0;
+            int r = select(slots[s].fd + 1, &rfds, NULL, NULL, &wait_tv);
+            if (r > 0) {
+                char *buf = malloc(SIDE_AGENT_BUF_SIZE);
+                size_t total = 0;
+                ssize_t n;
+                while ((n = read(slots[s].fd, buf + total,
+                                 SIDE_AGENT_BUF_SIZE - total - 1)) > 0) {
+                    total += n;
+                    if (total >= SIDE_AGENT_BUF_SIZE - 1) break;
+                }
+                if (total > 0) {
+                    buf[total] = '\0';
+                    slots[s].result = buf;
+                } else {
+                    free(buf);
+                }
+            }
+            slots[s].done = 1;
+            close(slots[s].fd);
+            kill(slots[s].pid, SIGTERM);
+            waitpid(slots[s].pid, NULL, 0);
+        }
     }
 
     if (slots_count == 0)
         return NULL;
 
-    /* Compute deadline from max timeout */
-    int max_timeout = 0;
-    for (int i = 0; i < slots_count; i++) {
-        int t = g_agents[slots[i].agent_idx].timeout_sec;
-        if (t <= 0) t = SIDE_AGENT_DEFAULT_TIMEOUT;
-        if (t > max_timeout) max_timeout = t;
-    }
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += max_timeout;
-
-    /* Select loop: read from pipes as they become ready */
-    int n_pending = slots_count;
-    while (n_pending > 0) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        long remaining_ms = (deadline.tv_sec - now.tv_sec) * 1000
-                          + (deadline.tv_nsec - now.tv_nsec) / 1000000;
-        if (remaining_ms <= 0) break;
-
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        int maxfd = -1;
-        for (int i = 0; i < slots_count; i++) {
-            if (!slots[i].done) {
-                FD_SET(slots[i].fd, &readfds);
-                if (slots[i].fd > maxfd) maxfd = slots[i].fd;
-            }
-        }
-        if (maxfd < 0) break;
-
-        struct timeval tv;
-        tv.tv_sec = remaining_ms / 1000;
-        tv.tv_usec = (remaining_ms % 1000) * 1000;
-
-        int ret = select(maxfd + 1, &readfds, NULL, NULL, &tv);
-        if (ret <= 0) break;
-
-        for (int i = 0; i < slots_count; i++) {
-            if (slots[i].done) continue;
-            if (!FD_ISSET(slots[i].fd, &readfds)) continue;
-
-            /* Read all available data */
-            char *buf = malloc(SIDE_AGENT_BUF_SIZE);
-            if (!buf) { slots[i].done = 1; n_pending--; continue; }
-
-            size_t total = 0;
-            ssize_t n;
-            while ((n = read(slots[i].fd, buf + total,
-                             SIDE_AGENT_BUF_SIZE - total - 1)) > 0) {
-                total += n;
-                if (total >= SIDE_AGENT_BUF_SIZE - 1) break;
-            }
-
-            if (total > 0) {
-                buf[total] = '\0';
-                slots[i].result = buf;
-            } else {
-                free(buf);
-            }
-
-            slots[i].done = 1;
-            n_pending--;
-        }
-    }
-
-    /* Close pipes and reap children */
-    for (int i = 0; i < slots_count; i++) {
-        close(slots[i].fd);
-        if (slots[i].pid > 0) {
-            kill(slots[i].pid, SIGTERM);
-            waitpid(slots[i].pid, NULL, WNOHANG);
-            /* Second attempt in case first was too early */
-            waitpid(slots[i].pid, NULL, WNOHANG);
-        }
-    }
+    /* All slots were read and reaped inline above (serial execution) */
 
     /* Combine results: wrap each in [name context]...[end name context] */
     size_t total_len = 0;
@@ -248,7 +224,7 @@ void side_agent_init(void)
 {
     g_agent_count = 0;
 
-    /* Register global memory agent (pre-query search + post-query extraction) */
+    /* Register global memory agent */
     if (llm_global_mem_agent_ready()) {
         side_agent_register(&(side_agent_t){
             .name        = "global_memory",
@@ -256,6 +232,17 @@ void side_agent_init(void)
             .enabled     = 1,
             .pre_query   = global_mem_agent_pre_query_cb,
             .post_query  = global_mem_agent_post_query_cb,
+        });
+    }
+
+    /* Register cron agent */
+    if (llm_cron_agent_ready()) {
+        side_agent_register(&(side_agent_t){
+            .name        = "cron",
+            .timeout_sec = 5,
+            .enabled     = llm_global_mem_agent_ready(),
+            .pre_query   = cron_agent_pre_query_cb,
+            .post_query  = llm_global_mem_agent_ready() ? cron_agent_post_query_cb : NULL,
         });
     }
 }

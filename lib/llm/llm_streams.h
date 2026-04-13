@@ -50,6 +50,9 @@ void stream_memory_output(const char *text);
 /* Write global memory agent debug info */
 void stream_global_mem_agent_output(const char *text);
 
+/* Write cron agent debug info */
+void stream_cron_agent_output(const char *text);
+
 /* Write side agent framework debug info */
 void stream_side_agent_output(const char *name, const char *text);
 

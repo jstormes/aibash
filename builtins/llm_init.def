@@ -87,6 +87,7 @@ extern int evalstring (char *, const char *, int);
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
 #include "../lib/llm/llm_global_mem_agent.h"
+#include "../lib/llm/llm_cron_agent.h"
 #include "../lib/llm/llm_side_agent.h"
 #include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
@@ -165,6 +166,14 @@ llm_init_builtin (WORD_LIST *list)
         char logdir[4096];
         snprintf(logdir, sizeof(logdir), "%s/logs", memdir);
         llm_log_init(logdir);
+    }
+
+    /* Initialize cron agent */
+    {
+        char crondir[4096];
+        const char *home = getenv("HOME");
+        snprintf(crondir, sizeof(crondir), "%s/.aibash_cron", home ? home : ".");
+        llm_cron_agent_init(crondir);
     }
 
     /* Initialize side agent framework */

@@ -107,6 +107,14 @@ void stream_global_mem_agent_output(const char *text)
     labeled_write(stderr, "global-mem", "\033[93m", text, &global_mem_sol);
 }
 
+static int cron_sol = 1;
+
+void stream_cron_agent_output(const char *text)
+{
+    if (!text || !streams_label_mode) return;
+    labeled_write(stderr, "cron", "\033[94m", text, &cron_sol);
+}
+
 static int side_sol = 1;
 
 void stream_side_agent_output(const char *name, const char *text)

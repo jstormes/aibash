@@ -23,18 +23,23 @@ $PRODUCES llm.c
 $BUILTIN llm
 $DEPENDS_ON HAVE_LLM
 $FUNCTION llm_builtin
-$SHORT_DOC llm [-c] [query ...] | remember <text> | forget <id|text> | memories
+$SHORT_DOC llm [-c] [query ...] | remember | forget | memories | cleanup | cron
 Send a query to an LLM and run the agentic tool loop.
 
 Options:
   -c	clear conversation history
 
-Subcommands:
+Memory subcommands:
   remember <text>   save a fact to long-term memory
   forget <id>       delete a memory by ID
   forget <text>     delete memories matching text
   memories          list all saved memories
   cleanup           run memory cleanup (split, deduplicate, resolve)
+
+Cron subcommands:
+  cron              list scheduled tasks
+  cron list         list scheduled tasks
+  cron remove <id>  remove a scheduled task
 
 Concatenates arguments into a query and sends it to the configured
 LLM server. The LLM can call tools (ls, cat, grep, run, man,
@@ -73,6 +78,7 @@ $END
 #include "../lib/llm/llm_api.h"
 #include "../lib/llm/llm_history.h"
 #include "../lib/llm/llm_global_mem_agent.h"
+#include "../lib/llm/llm_cron_agent.h"
 #include "../lib/llm/llm_side_agent.h"
 #include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
@@ -158,7 +164,15 @@ static int ensure_initialized(void)
         llm_log_init(logdir);
     }
 
-    /* Initialize side agent framework (registers global memory agent, etc.) */
+    /* Initialize cron agent */
+    {
+        char crondir[4096];
+        const char *home = getenv("HOME");
+        snprintf(crondir, sizeof(crondir), "%s/.aibash_cron", home ? home : ".");
+        llm_cron_agent_init(crondir);
+    }
+
+    /* Initialize side agent framework (registers all agents) */
     side_agent_init();
 
     /* Set up streaming callbacks */
@@ -278,6 +292,54 @@ llm_builtin (WORD_LIST *list)
             llm_global_mem_agent_cleanup_run(g_servers->memory_max);
             printf("Cleanup complete.\n");
 
+            return (EXECUTION_SUCCESS);
+        }
+
+        if (strcmp(cmd, "cron") == 0) {
+            list = list->next;
+            if (!list || strcmp(list->word->word, "list") == 0) {
+                char *jobs = llm_cron_list();
+                printf("%s", jobs);
+                free(jobs);
+                return (EXECUTION_SUCCESS);
+            }
+            const char *sub = list->word->word;
+            if (strcmp(sub, "remove") == 0) {
+                list = list->next;
+                if (!list) {
+                    builtin_error("cron remove requires an ID");
+                    return (EXECUTION_FAILURE);
+                }
+                int id = atoi(list->word->word);
+                if (llm_cron_remove(id) == 0)
+                    printf("Removed scheduled task #%d\n", id);
+                else
+                    builtin_error("task #%d not found", id);
+                return (EXECUTION_SUCCESS);
+            }
+            builtin_error("unknown cron subcommand: %s (use: list, remove)", sub);
+            return (EXECUTION_FAILURE);
+        }
+
+        if (strcmp(cmd, "sideagent") == 0) {
+            list = list->next;
+            if (!list) {
+                builtin_error("sideagent requires a query");
+                return (EXECUTION_FAILURE);
+            }
+            char *query = string_list(list);
+            char cwd[4096];
+            if (!getcwd(cwd, sizeof(cwd))) strcpy(cwd, ".");
+            printf("Running side agents for: %s\n", query);
+            fflush(stdout);
+            char *result = side_agents_pre_query(query, cwd);
+            if (result) {
+                printf("%s", result);
+                free(result);
+            } else {
+                printf("(no context returned)\n");
+            }
+            free(query);
             return (EXECUTION_SUCCESS);
         }
     }

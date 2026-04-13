@@ -78,12 +78,13 @@ static const char *SYSTEM_PROMPT =
     "- One-line command summaries are automatically included with 'run' results.\n"
     "- Use the 'man' tool when you need specific flags, options, or usage details.\n"
     "- Prefer 'man' over guessing flags -- it returns accurate system documentation.\n\n"
-    "Long-term memory:\n"
-    "- If a [global_memory context] block is present above, it contains facts\n"
-    "  about the user from previous sessions. Use this context to give better answers.\n"
-    "- Memory is managed automatically -- you do not need to save or delete memories.\n"
-    "- If the user asks to remember or forget something, tell them to use the\n"
-    "  'llm remember' or 'llm forget' shell commands directly.";
+    "\n"
+    "Context blocks:\n"
+    "- Blocks marked [name context] ... [end name context] may appear at the\n"
+    "  end of this system prompt. They are injected by background agents and\n"
+    "  contain information relevant to the user's query.\n"
+    "- ALWAYS incorporate this information into your answer.\n"
+    "- Do NOT say 'context is empty' -- if a block is present, use it.";
 
 /* ---- Interrupt check ---- */
 
