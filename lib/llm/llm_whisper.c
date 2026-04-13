@@ -15,12 +15,6 @@
 
 #define WHISPER_TIMEOUT_SEC 5
 #define WHISPER_BUF_SIZE    4096
-#define WHISPER_CACHE_TTL   60  /* seconds */
-
-/* Cache: avoid redundant LLM calls for similar queries */
-static char *g_cache_query = NULL;
-static char *g_cache_result = NULL;
-static time_t g_cache_time = 0;
 
 static const char *WHISPER_PROMPT =
     "Given the user's memories below, which ones DIRECTLY answer or relate "
@@ -69,15 +63,6 @@ static int is_empty_response(const char *text)
 char *llm_whisper_agents(const char *query)
 {
     if (!query || !query[0]) return NULL;
-
-    /* Check cache: reuse recent result if query matches within TTL */
-    time_t now = time(NULL);
-    if (g_cache_result && g_cache_query
-        && strcmp(g_cache_query, query) == 0
-        && (now - g_cache_time) < WHISPER_CACHE_TTL) {
-        stream_whisper_output("(cached)\n");
-        return strdup(g_cache_result);
-    }
 
     /* Build the message with all memories */
     char *agent_msg = build_agent_message(query);
@@ -148,13 +133,6 @@ char *llm_whisper_agents(const char *query)
         free(result);
         return NULL;
     }
-
-    /* Update cache */
-    free(g_cache_query);
-    free(g_cache_result);
-    g_cache_query = strdup(query);
-    g_cache_result = strdup(result);
-    g_cache_time = now;
 
     stream_whisper_output(result);
     return result;
