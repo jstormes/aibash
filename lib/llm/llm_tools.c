@@ -29,10 +29,9 @@ static llm_builtin_t builtins[] = {
     {"write_file", llm_tool_write_file, SAFETY_CONFIRM, "Write content to file"},
     {"man",        llm_tool_man,        SAFETY_AUTO,    "Get detailed man page info"},
     {"rm",         llm_tool_rm,         SAFETY_DANGER,  "Remove files"},
-    {"memory_save",   llm_memory_tool_save,   SAFETY_AUTO, "Save to long-term memory"},
-    /* memory_search removed -- whisper agent handles memory retrieval */
-    {"memory_list",   llm_memory_tool_list,   SAFETY_AUTO, "List all memories"},
-    {"memory_forget", llm_memory_tool_forget, SAFETY_CONFIRM, "Forget a memory"},
+    /* All memory tools removed -- whisper agent handles memory retrieval,
+       background agent handles saving/cleanup. User commands (llm remember,
+       llm forget, llm memories) still work directly via the builtin. */
     {NULL, NULL, 0, NULL}
 };
 

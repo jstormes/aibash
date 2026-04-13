@@ -46,11 +46,7 @@ static const char *TOOLS_JSON =
 "  {\"type\":\"function\",\"function\":{\"name\":\"head\",\"description\":\"Show first N lines of a file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"lines\":{\"type\":\"integer\"}},\"required\":[\"path\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"wc\",\"description\":\"Count lines/words/chars\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"flags\":{\"type\":\"string\"}},\"required\":[\"path\"]}}},"
 "  {\"type\":\"function\",\"function\":{\"name\":\"man\",\"description\":\"Get detailed man page for a command (synopsis, options, usage). Use when you need exact flags or options.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Command name to look up\"}},\"required\":[\"command\"]}}},"
-"  {\"type\":\"function\",\"function\":{\"name\":\"run\",\"description\":\"Execute a shell command pipeline. Use for any command not covered by builtins.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"pipeline\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Array of commands to pipe together\"},\"stdin_file\":{\"type\":\"string\"},\"stdout_file\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"pipeline\"]}}},"
-"  {\"type\":\"function\",\"function\":{\"name\":\"memory_save\",\"description\":\"Save a fact, preference, or note to long-term memory. Use when the user tells you something worth remembering for future sessions.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\",\"description\":\"The fact or preference to remember\"},\"keywords\":{\"type\":\"string\",\"description\":\"Comma-separated keywords for search\"}},\"required\":[\"content\"]}}},"
-/* memory_search removed -- whisper agent handles memory retrieval */
-"  {\"type\":\"function\",\"function\":{\"name\":\"memory_list\",\"description\":\"List all saved long-term memories.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},"
-"  {\"type\":\"function\",\"function\":{\"name\":\"memory_forget\",\"description\":\"Delete a memory. Use 'id' to delete by ID (get IDs from memory_list first). Use 'match' to delete by text substring.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"description\":\"Memory ID to delete\"},\"match\":{\"type\":\"string\",\"description\":\"Text to match for deletion\"}}}}}"
+"  {\"type\":\"function\",\"function\":{\"name\":\"run\",\"description\":\"Execute a shell command pipeline. Use for any command not covered by builtins.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"pipeline\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Array of commands to pipe together\"},\"stdin_file\":{\"type\":\"string\"},\"stdout_file\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"pipeline\"]}}}"
 "]";
 
 static const char *SYSTEM_PROMPT =
@@ -85,18 +81,11 @@ static const char *SYSTEM_PROMPT =
     "- Use the 'man' tool when you need specific flags, options, or usage details.\n"
     "- Prefer 'man' over guessing flags -- it returns accurate system documentation.\n\n"
     "Long-term memory:\n"
-    "- You have access to long-term memory that persists across sessions.\n"
-    "- Use 'memory_save' when the user shares preferences, facts about themselves,\n"
-    "  project details, or anything worth remembering for future conversations.\n"
-    "- Relevant memories are automatically provided in the [memory context] block above.\n"
-    "- Use 'memory_list' to show all memories when the user asks to see them.\n"
-    "- NEVER delete memories unless the user EXPLICITLY asks you to forget something.\n"
-    "- When the user asks to forget something, FIRST use 'memory_list' to find\n"
-    "  matching memories, note their IDs, then call 'memory_forget' with each ID.\n"
-    "- Do not save trivial or transient information (command outputs, temporary paths).\n"
-    "- When the user says 'remember that...' or 'don't forget...', always save it.\n"
-    "- When the user says 'forget...' or 'delete memory...', search and delete it.\n"
-    "- Do NOT call multiple memory tools unprompted. One tool call per user request.";
+    "- If a [memory context] block is present above, it contains facts about the\n"
+    "  user from previous sessions. Use this context to give better answers.\n"
+    "- Memory is managed automatically -- you do not need to save or delete memories.\n"
+    "- If the user asks to remember or forget something, tell them to use the\n"
+    "  'llm remember' or 'llm forget' shell commands directly.";
 
 /* ---- Interrupt check ---- */
 
