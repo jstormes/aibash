@@ -17,9 +17,12 @@
 #define WHISPER_BUF_SIZE    4096
 
 static const char *WHISPER_PROMPT =
-    "Given the user's memories below, which ones are relevant to their query?\n\n"
+    "Given the user's memories below, which ones DIRECTLY answer or relate "
+    "to their specific query? Be strict -- only include memories that the "
+    "user would need to answer this exact question. Do not include loosely "
+    "related or tangential memories.\n\n"
     "Return ONLY the relevant memories as bullet points (- memory text).\n"
-    "If none are relevant, return exactly: NONE\n"
+    "If none are directly relevant, return exactly: NONE\n"
     "No explanation, no markdown, just bullet points or NONE.";
 
 /*

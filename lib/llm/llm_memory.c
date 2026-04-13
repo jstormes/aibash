@@ -524,7 +524,10 @@ char *llm_memory_whisper(const char *query)
         if (strncmp(g_memories[i].content, "DELETED:", 8) == 0)
             continue;
         int s = match_score(&g_memories[i], query);
-        if (s > 0) {
+        /* Require score >= 2 to whisper -- filters out weak single-word
+           matches like "use" matching "I use Docker" on a database query.
+           Score 2 = one exact keyword match or two stemmed matches. */
+        if (s >= 2) {
             scored[nscored].idx = i;
             scored[nscored].score = s;
             nscored++;
