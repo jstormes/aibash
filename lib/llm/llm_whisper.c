@@ -81,7 +81,7 @@ char *llm_whisper_agents(const char *query)
         close(pipefd[0]);
         close(STDIN_FILENO);
 
-        char *result = llm_mem_api_chat(WHISPER_PROMPT, agent_msg, 0);
+        char *result = llm_mem_api_chat(WHISPER_PROMPT, agent_msg, 0, "whisper");
         if (result) {
             write(pipefd[1], result, strlen(result));
             free(result);

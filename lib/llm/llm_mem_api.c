@@ -51,7 +51,7 @@ static size_t mem_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 }
 
 char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
-                       int enable_thinking)
+                       int enable_thinking, const char *log_caller)
 {
     if (!g_mem_api_url || !g_mem_model) return NULL;
 
@@ -124,14 +124,14 @@ char *llm_mem_api_chat(const char *system_prompt, const char *user_message,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        llm_log_api_call("mem_agent", body, "(curl error)", elapsed_ms);
+        llm_log_api_call(log_caller ? log_caller : "mem_agent", body, "(curl error)", elapsed_ms);
         free(body);
         free(response.data);
         return NULL;
     }
 
     /* Log request/response */
-    llm_log_api_call("mem_agent", body, response.data, elapsed_ms);
+    llm_log_api_call(log_caller ? log_caller : "mem_agent", body, response.data, elapsed_ms);
     free(body);
 
     /* Parse response -- extract content string */

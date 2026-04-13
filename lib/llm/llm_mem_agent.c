@@ -191,7 +191,7 @@ void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int
      */
     {
         char *prompt = build_prompt_with_memories("Conversation:\n", conversation);
-        char *response = llm_mem_api_chat(EXTRACT_PROMPT, prompt, 0);
+        char *response = llm_mem_api_chat(EXTRACT_PROMPT, prompt, 0, "extract");
         free(prompt);
 
         if (response) {
@@ -214,7 +214,7 @@ void llm_mem_agent_extract(const char *conversation, const char *memory_dir, int
         /* Only run cleanup if there are memories to clean */
         if (llm_memory_count() > 1) {
             char *prompt = build_prompt_with_memories(NULL, NULL);
-            char *response = llm_mem_api_chat(CLEANUP_PROMPT, prompt, 1);
+            char *response = llm_mem_api_chat(CLEANUP_PROMPT, prompt, 1, "cleanup");
             free(prompt);
 
             if (response) {
