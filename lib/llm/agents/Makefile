@@ -18,7 +18,8 @@ LIBRARY = libagents.a
 
 # Tests
 TEST_SOURCES = tests/test_main.c tests/test_side_agent.c \
-               tests/test_mem_agent.c tests/test_cron_agent.c
+               tests/test_mem_agent.c tests/test_cron_agent.c \
+               tests/test_integration.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BIN = tests/run_tests
 
@@ -62,3 +63,4 @@ tests/test_mem_agent.o: tests/test_mem_agent.c tests/test_harness.h mem_agent.h
 cron_agent.o: cron_agent.c cron_agent.h side_agent.h
 agents_setup.o: agents_setup.c agents_setup.h side_agent.h mem_agent.h cron_agent.h
 tests/test_cron_agent.o: tests/test_cron_agent.c tests/test_harness.h cron_agent.h
+tests/test_integration.o: tests/test_integration.c tests/test_harness.h side_agent.h mem_agent.h cron_agent.h
