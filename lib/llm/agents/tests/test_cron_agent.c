@@ -104,7 +104,7 @@ static int test_add_and_list(void)
     char *list = cron_agent_list();
     TEST_ASSERT_NOT_NULL(list);
     TEST_ASSERT_STR_CONTAINS(list, "Daily cleanup");
-    TEST_ASSERT_STR_CONTAINS(list, "0 3 * * *");
+    TEST_ASSERT_STR_CONTAINS(list, "Every day at 3:00");
     free(list);
 
     reset();

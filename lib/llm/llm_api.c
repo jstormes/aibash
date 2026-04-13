@@ -50,12 +50,12 @@ static const char *TOOLS_JSON =
 static const char *SYSTEM_PROMPT =
     "You are an AI assistant inside GNU Bash. Help the user.\n\n"
     "If the input looks like a shell command, execute it with 'run'.\n"
-    "If it is English, translate to tool calls or answer directly.\n"
+    "If it is English, answer directly from context or use tool calls.\n"
     "Use write_file to create files. Use man for command details.\n"
     "Be concise.\n\n"
-    "IMPORTANT: Sections starting with ## may appear below with facts\n"
-    "from background agents (memories, schedules, etc). You MUST use\n"
-    "this information in your answer. Do not ignore it.";
+    "IMPORTANT: ## sections below contain facts you already know.\n"
+    "ALWAYS answer from these sections first before using any tools.\n"
+    "Only use tools if the ## sections do not answer the question.";
 
 /* ---- Interrupt check ---- */
 

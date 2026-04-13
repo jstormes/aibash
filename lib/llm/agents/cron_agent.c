@@ -326,6 +326,62 @@ int cron_agent_remove(int id)
     return -1;
 }
 
+/* Convert a 5-field cron schedule to English */
+static const char *dow_names[] = {"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+static const char *month_names[] = {"","January","February","March","April","May","June",
+                                     "July","August","September","October","November","December"};
+
+static char *cron_to_english(const char *schedule)
+{
+    int minute, hour, dom, mon, dow;
+    char buf[256];
+
+    /* Try to parse 5 fields: min hour dom mon dow */
+    if (sscanf(schedule, "%d %d %d %d %d", &minute, &hour, &dom, &mon, &dow) == 5) {
+        /* Specific date + time */
+        snprintf(buf, sizeof(buf), "%s %d at %d:%02d",
+                 (mon >= 1 && mon <= 12) ? month_names[mon] : "?", dom, hour, minute);
+    } else {
+        char s_min[16], s_hour[16], s_dom[16], s_mon[16], s_dow[16];
+        if (sscanf(schedule, "%15s %15s %15s %15s %15s", s_min, s_hour, s_dom, s_mon, s_dow) != 5)
+            return strdup(schedule);  /* can't parse, return raw */
+
+        int m = atoi(s_min);
+        int h = atoi(s_hour);
+
+        if (strcmp(s_dom, "*") == 0 && strcmp(s_mon, "*") == 0 && strcmp(s_dow, "*") == 0) {
+            /* Every day */
+            snprintf(buf, sizeof(buf), "Every day at %d:%02d", h, m);
+        } else if (strcmp(s_dom, "*") == 0 && strcmp(s_mon, "*") == 0 && strcmp(s_dow, "0") != 0 && s_dow[0] != '*') {
+            /* Specific day of week */
+            int d = atoi(s_dow);
+            snprintf(buf, sizeof(buf), "Every %s at %d:%02d",
+                     (d >= 0 && d <= 6) ? dow_names[d] : s_dow, h, m);
+        } else {
+            /* Complex — build a simple description */
+            snprintf(buf, sizeof(buf), "Scheduled (%s) at %d:%02d", schedule, h, m);
+        }
+    }
+
+    return strdup(buf);
+}
+
+/* Format a job as a human-readable line */
+static int format_job(char *buf, size_t bufsz, cron_job_t *j)
+{
+    if (strcmp(j->type, "cron") == 0) {
+        char *when = cron_to_english(j->schedule);
+        int n = snprintf(buf, bufsz, "[%d] %s: %s (runs: %s)\n",
+                         j->id, when, j->description, j->command);
+        free(when);
+        return n;
+    } else {
+        /* at job — schedule is already a datetime string */
+        return snprintf(buf, bufsz, "[%d] %s: %s (runs: %s)\n",
+                        j->id, j->schedule, j->description, j->command);
+    }
+}
+
 char *cron_agent_list(void)
 {
     if (!g_ready || g_job_count == 0)
@@ -334,10 +390,7 @@ char *cron_agent_list(void)
     char *buf = malloc(4096);
     size_t off = 0;
     for (int i = 0; i < g_job_count; i++) {
-        off += snprintf(buf + off, 4096 - off, "[%d] (%s) %s -- %s -- %s\n",
-                        g_jobs[i].id, g_jobs[i].type,
-                        g_jobs[i].schedule, g_jobs[i].description,
-                        g_jobs[i].command);
+        off += format_job(buf + off, 4096 - off, &g_jobs[i]);
     }
     return buf;
 }
