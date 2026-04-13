@@ -88,6 +88,7 @@ extern int evalstring (char *, const char *, int);
 #include "../lib/llm/llm_history.h"
 #include "../lib/llm/llm_memory.h"
 #include "../lib/llm/llm_mem_agent.h"
+#include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -155,6 +156,11 @@ llm_init_builtin (WORD_LIST *list)
         const char *home = getenv("HOME");
         snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
         mem_count = llm_memory_init(memdir, g_servers->memory_max);
+
+        /* Initialize API logging */
+        char logdir[4096];
+        snprintf(logdir, sizeof(logdir), "%s/logs", memdir);
+        llm_log_init(logdir);
     }
 
     /* Initialize memory agent if configured */

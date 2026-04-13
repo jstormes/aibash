@@ -10,6 +10,7 @@
 #include "llm_memory.h"
 #include "llm_whisper.h"
 #include "llm_mem_agent.h"
+#include "llm_log.h"
 #include "llm_config.h"
 #include "llm_streams.h"
 #include "cJSON.h"
@@ -350,18 +351,30 @@ llm_response_t *llm_chat(const char *user_input, const char *cwd,
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curl_progress_cb);
 
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
     spinner_start();
     CURLcode res = curl_easy_perform(curl);
     spinner_stop();
+
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    double elapsed_ms = (t_end.tv_sec - t_start.tv_sec) * 1000.0
+                      + (t_end.tv_nsec - t_start.tv_nsec) / 1e6;
+
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    free(body);
 
     if (res != CURLE_OK) {
         fprintf(stderr, "bash-llm: curl error: %s\n", curl_easy_strerror(res));
+        llm_log_api_call("main_chat", body, "(curl error)", elapsed_ms);
+        free(body);
         free(response.data);
         return NULL;
     }
+
+    llm_log_api_call("main_chat", body, response.data, elapsed_ms);
+    free(body);
 
     llm_response_t *result = parse_full_response(response.data);
     free(response.data);
@@ -579,25 +592,59 @@ llm_response_t *llm_chat_stream(const char *user_input, const char *cwd,
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curl_progress_cb);
 
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
     spinner_start();
     CURLcode res = curl_easy_perform(curl);
     spinner_stop();
+
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    double elapsed_ms = (t_end.tv_sec - t_start.tv_sec) * 1000.0
+                      + (t_end.tv_nsec - t_start.tv_nsec) / 1e6;
+
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    free(body);
 
     if (res != CURLE_OK) {
         fprintf(stderr, "bash-llm: curl error: %s\n", curl_easy_strerror(res));
+        llm_log_api_call("main_stream", body, "(curl error)", elapsed_ms);
+        free(body);
         sse_state_cleanup(&sse);
         return NULL;
     }
 
+    /* Log streaming result as a summary response */
     {
         char dbg[256];
         snprintf(dbg, sizeof(dbg), "text=%zuB, tool_calls=%d",
                  sse.text_len, sse.num_tool_calls);
         stream_api_output("\xe2\x86\x90", dbg);
+
+        /* Build a summary JSON for the log */
+        cJSON *resp_summary = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp_summary, "type", "sse_stream");
+        cJSON_AddNumberToObject(resp_summary, "text_bytes", (double)sse.text_len);
+        cJSON_AddNumberToObject(resp_summary, "tool_calls", sse.num_tool_calls);
+        if (sse.full_text && sse.text_len > 0)
+            cJSON_AddStringToObject(resp_summary, "text", sse.full_text);
+        for (int i = 0; i < sse.num_tool_calls; i++) {
+            char key[32];
+            snprintf(key, sizeof(key), "tool_%d", i);
+            cJSON *tc = cJSON_CreateObject();
+            if (sse.tool_calls[i].name)
+                cJSON_AddStringToObject(tc, "name", sse.tool_calls[i].name);
+            if (sse.tc_args[i])
+                cJSON_AddStringToObject(tc, "arguments", sse.tc_args[i]);
+            cJSON_AddItemToObject(resp_summary, key, tc);
+        }
+        char *resp_str = cJSON_PrintUnformatted(resp_summary);
+        cJSON_Delete(resp_summary);
+
+        llm_log_api_call("main_stream", body, resp_str, elapsed_ms);
+        free(resp_str);
     }
+    free(body);
 
     llm_response_t *result = calloc(1, sizeof(*result));
 
