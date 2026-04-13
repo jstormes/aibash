@@ -12,12 +12,12 @@ CFLAGS = -g -O2 -Wall -Wextra -Wno-unused-parameter
 INCLUDES = -I.
 
 # Library
-SOURCES = side_agent.c
-OBJECTS = side_agent.o
+SOURCES = side_agent.c mem_agent.c
+OBJECTS = side_agent.o mem_agent.o
 LIBRARY = libagents.a
 
 # Tests
-TEST_SOURCES = tests/test_main.c tests/test_side_agent.c
+TEST_SOURCES = tests/test_main.c tests/test_side_agent.c tests/test_mem_agent.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BIN = tests/run_tests
 
@@ -38,7 +38,7 @@ $(LIBRARY): $(OBJECTS)
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-$(TEST_BIN): $(TEST_OBJECTS) side_agent.o
+$(TEST_BIN): $(TEST_OBJECTS) side_agent.o mem_agent.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
@@ -47,5 +47,7 @@ clean:
 
 # Dependencies
 side_agent.o: side_agent.c side_agent.h
+mem_agent.o: mem_agent.c mem_agent.h side_agent.h
 tests/test_main.o: tests/test_main.c tests/test_harness.h
 tests/test_side_agent.o: tests/test_side_agent.c tests/test_harness.h side_agent.h
+tests/test_mem_agent.o: tests/test_mem_agent.c tests/test_harness.h mem_agent.h
