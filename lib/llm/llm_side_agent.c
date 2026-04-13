@@ -218,31 +218,63 @@ void side_agents_post_query(const char *query, const char *response, const char 
     }
 }
 
+/* ---- Agent table ---- */
+
+/*
+ * Static table of all built-in side agents.
+ * Each agent owns its init/cleanup and sets enabled=1 if ready.
+ * To add a new agent, add an entry here.
+ */
+static side_agent_t g_agent_defs[] = {
+    {
+        .name        = "global_memory",
+        .timeout_sec = 5,
+        .enabled     = 0,
+        .init        = global_mem_agent_init,
+        .cleanup     = global_mem_agent_cleanup,
+        .pre_query   = global_mem_agent_pre_query_cb,
+        .post_query  = global_mem_agent_post_query_cb,
+    },
+    {
+        .name        = "cron",
+        .timeout_sec = 5,
+        .enabled     = 0,
+        .init        = cron_agent_init,
+        .cleanup     = cron_agent_cleanup,
+        .pre_query   = cron_agent_pre_query_cb,
+        .post_query  = cron_agent_post_query_cb,
+    },
+    { .name = NULL }  /* sentinel */
+};
+
 /* ---- Initialization ---- */
 
-void side_agent_init(void)
+void side_agent_init(server_config_t *config)
 {
     g_agent_count = 0;
 
-    /* Register global memory agent */
-    if (llm_global_mem_agent_ready()) {
-        side_agent_register(&(side_agent_t){
-            .name        = "global_memory",
-            .timeout_sec = 5,
-            .enabled     = 1,
-            .pre_query   = global_mem_agent_pre_query_cb,
-            .post_query  = global_mem_agent_post_query_cb,
-        });
-    }
+    for (int i = 0; g_agent_defs[i].name; i++) {
+        side_agent_t agent = g_agent_defs[i];
 
-    /* Register cron agent */
-    if (llm_cron_agent_ready()) {
-        side_agent_register(&(side_agent_t){
-            .name        = "cron",
-            .timeout_sec = 5,
-            .enabled     = llm_global_mem_agent_ready(),
-            .pre_query   = cron_agent_pre_query_cb,
-            .post_query  = llm_global_mem_agent_ready() ? cron_agent_post_query_cb : NULL,
-        });
+        if (agent.init && agent.init(config) == 0) {
+            agent.enabled = 1;
+        }
+
+        /* Register even if disabled — can be toggled later */
+        side_agent_register(&agent);
     }
+}
+
+void side_agent_cleanup(void)
+{
+    for (int i = 0; i < g_agent_count; i++) {
+        if (g_agents[i].cleanup)
+            g_agents[i].cleanup();
+    }
+    g_agent_count = 0;
+}
+
+int side_agent_count(void)
+{
+    return g_agent_count;
 }

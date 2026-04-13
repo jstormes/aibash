@@ -11,7 +11,18 @@
 #include "llm_streams.h"
 #include "cJSON.h"
 
-static cron_job_t g_jobs[CRON_AGENT_MAX_JOBS];
+#define CRON_MAX_JOBS 256
+
+typedef struct {
+    int id;
+    char *type;         /* "cron" or "at" */
+    char *description;  /* human-readable description */
+    char *schedule;     /* cron: "0 3 * * *", at: "2026-12-15 08:00" */
+    char *command;      /* shell command to execute */
+    int at_job_id;      /* at job system ID (-1 if cron) */
+} cron_job_t;
+
+static cron_job_t g_jobs[CRON_MAX_JOBS];
 static int g_job_count = 0;
 static int g_next_id = 1;
 static int g_ready = 0;
@@ -21,12 +32,14 @@ static char g_jobs_path[4096];
 /* ---- LLM Prompts ---- */
 
 static const char *SEARCH_PROMPT =
-    "Return scheduled tasks relevant to the query. Copy task lines exactly.\n"
-    "If query is unrelated to time/schedules/reminders, return: NONE\n\n"
+    "Which scheduled tasks below could be relevant to the query?\n"
+    "Include anything related to the topic, time, or activity mentioned.\n"
+    "When in doubt, include it. Copy task lines exactly.\n"
+    "If nothing relevant: NONE\n\n"
     "Example 1:\n"
-    "Query: what is scheduled\n"
-    "Tasks: [1] daily backup at 3am\n"
-    "Answer: [1] daily backup at 3am\n\n"
+    "Query: what do I have coming up\n"
+    "Tasks: [1] daily backup at 3am [2] birthday Dec 15\n"
+    "Answer:\n[1] daily backup at 3am\n[2] birthday Dec 15\n\n"
     "Example 2:\n"
     "Query: what is my name\n"
     "Tasks: [1] daily backup at 3am\n"
@@ -89,7 +102,7 @@ static int load_jobs(void)
     g_job_count = 0;
     g_next_id = 1;
 
-    for (int i = 0; i < n && g_job_count < CRON_AGENT_MAX_JOBS; i++) {
+    for (int i = 0; i < n && g_job_count < CRON_MAX_JOBS; i++) {
         cJSON *item = cJSON_GetArrayItem(arr, i);
         if (!item) continue;
 
@@ -277,29 +290,32 @@ static int at_remove(int job_id)
 
 /* ---- Init / cleanup ---- */
 
-int llm_cron_agent_init(const char *storage_dir)
+int cron_agent_init(server_config_t *config)
 {
-    if (!storage_dir) return -1;
+    (void)config;
 
-    snprintf(g_storage_dir, sizeof(g_storage_dir), "%s", storage_dir);
-    snprintf(g_jobs_path, sizeof(g_jobs_path), "%s/jobs.json", storage_dir);
+    /* Only compute paths on first init (not re-init in forked child) */
+    if (!g_storage_dir[0]) {
+        const char *home = getenv("HOME");
+        snprintf(g_storage_dir, sizeof(g_storage_dir),
+                 "%s/.aibash_cron", home ? home : ".");
+        snprintf(g_jobs_path, sizeof(g_jobs_path),
+                 "%s/jobs.json", g_storage_dir);
+        mkdir(g_storage_dir, 0755);
+    }
 
-    /* Create storage directory */
-    mkdir(storage_dir, 0755);
-
-    int count = load_jobs();
+    load_jobs();
     g_ready = 1;
-    return count;
+    return 0;
 }
 
-void llm_cron_agent_cleanup(void)
+void cron_agent_cleanup(void)
 {
     for (int i = 0; i < g_job_count; i++)
         free_job(&g_jobs[i]);
     g_job_count = 0;
     g_next_id = 1;
     g_ready = 0;
-    /* Note: g_storage_dir and g_jobs_path are preserved for re-init */
 }
 
 int llm_cron_agent_ready(void)
@@ -317,7 +333,7 @@ int llm_cron_agent_count(void)
 int llm_cron_add(const char *type, const char *schedule,
                   const char *command, const char *description)
 {
-    if (!g_ready || g_job_count >= CRON_AGENT_MAX_JOBS) return -1;
+    if (!g_ready || g_job_count >= CRON_MAX_JOBS) return -1;
     if (!type || !schedule || !command) return -1;
 
     cron_job_t *j = &g_jobs[g_job_count];
@@ -463,8 +479,8 @@ void cron_agent_post_query_cb(const char *query, const char *response, const cha
     if (!g_ready) return;
 
     /* Reinitialize from disk in the forked child */
-    llm_cron_agent_cleanup();
-    llm_cron_agent_init(g_storage_dir);
+    cron_agent_cleanup();
+    cron_agent_init(NULL);  /* re-init from disk */
 
     size_t conv_len = strlen(query) + strlen(response) + 64;
     char *conversation = malloc(conv_len);

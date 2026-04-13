@@ -1,17 +1,19 @@
 #ifndef BASH_LLM_SIDE_AGENT_H
 #define BASH_LLM_SIDE_AGENT_H
 
+#include "llm_serverconf.h"
+
 /*
  * Side Agent Framework
  *
- * Side agents run alongside the main LLM agent to provide context or
- * perform background work. Each agent registers callbacks:
+ * Each side agent has four callbacks:
+ *   init       — initialize the agent (called once at startup)
+ *   pre_query  — search for context before the main LLM call
+ *   post_query — background work after the main LLM responds
+ *   cleanup    — free resources on shutdown
  *
- *   pre_query  — runs before the main LLM call (forked child, pipe back results)
- *   post_query — runs after the main LLM responds (double-forked, fire-and-forget)
- *
- * The framework handles all fork/pipe/select/reap plumbing.
- * Adding a new agent: write callback(s), register in side_agent_init().
+ * The framework handles fork/pipe/select plumbing.
+ * Agents are defined in a static table — add new ones to llm_side_agent.c.
  */
 
 #define SIDE_AGENT_MAX             8
@@ -19,51 +21,52 @@
 #define SIDE_AGENT_BUF_SIZE        4096
 
 typedef struct {
-    const char *name;       /* "global_memory", "local_memory", "cron" */
+    const char *name;       /* "global_memory", "cron", etc. */
     int timeout_sec;        /* pre_query timeout; 0 = use default (5s) */
-    int enabled;            /* runtime toggle; 1 = active */
+    int enabled;            /* set by init callback; 1 = active */
 
     /*
-     * Pre-query callback: called in a forked child process before the
-     * main LLM call. Returns malloc'd context string to inject into the
-     * system prompt, or NULL if nothing relevant.
+     * Init: called once at startup with the server config.
+     * The agent reads what it needs from config, sets up storage,
+     * and sets enabled=1 if ready. Returns 0 on success.
      */
+    int (*init)(server_config_t *config);
+
+    /* Cleanup: free resources. */
+    void (*cleanup)(void);
+
+    /* Pre-query: called in forked child. Returns malloc'd string or NULL. */
     char *(*pre_query)(const char *query, const char *cwd);
 
-    /*
-     * Post-query callback: called in a double-forked grandchild after
-     * the main LLM responds. Fire-and-forget — no return value.
-     * Results are persisted to disk by the callback.
-     */
+    /* Post-query: called in double-forked grandchild. Fire-and-forget. */
     void (*post_query)(const char *query, const char *response, const char *cwd);
 } side_agent_t;
 
 /*
- * Register a side agent. Returns 0 on success, -1 if registry full.
- * Called during initialization (side_agent_init).
+ * Initialize the side-agent framework. Calls init() on each built-in
+ * agent. This is the ONLY init call the builtins need to make.
  */
-int side_agent_register(const side_agent_t *agent);
+void side_agent_init(server_config_t *config);
 
 /*
- * Initialize the side-agent subsystem. Registers built-in agents
- * (global memory). Call after memory agent init.
+ * Cleanup all agents.
  */
-void side_agent_init(void);
+void side_agent_cleanup(void);
 
 /*
- * Run all enabled pre-query agents in parallel.
- * Forks one child per agent, pipes results back, select() with timeout.
- * Returns malloc'd combined context string with each result wrapped:
- *   [name context]\n...\n[end name context]\n
- * Returns NULL if no agent produced output. Caller frees.
+ * Run all enabled pre-query agents (serial fork/pipe/select).
+ * Returns malloc'd combined context string, or NULL. Caller frees.
  */
 char *side_agents_pre_query(const char *query, const char *cwd);
 
 /*
- * Run all enabled post-query agents in background.
- * Each gets its own double-fork (fire-and-forget).
- * Parent returns immediately.
+ * Run all enabled post-query agents (double-fork, fire-and-forget).
  */
 void side_agents_post_query(const char *query, const char *response, const char *cwd);
+
+/*
+ * Number of registered agents.
+ */
+int side_agent_count(void);
 
 #endif /* BASH_LLM_SIDE_AGENT_H */

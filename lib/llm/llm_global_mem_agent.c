@@ -7,8 +7,12 @@
 #include "llm_global_mem_api.h"
 #include "llm_memory.h"
 #include "llm_streams.h"
+#include "llm_log.h"
 #include "llm_serverconf.h"
 #include "cJSON.h"
+
+/* Forward declaration */
+void llm_global_mem_agent_extract(const char *conversation);
 
 static int g_agent_ready = 0;    /* LLM available for search/extract */
 static int g_store_ready = 0;    /* memory store initialized */
@@ -18,13 +22,14 @@ static int g_memory_max = 200;   /* max entries */
 /* ---- Memory search prompt ---- */
 
 static const char *SEARCH_PROMPT =
-    "Given the user's memories below, which ones DIRECTLY answer or relate "
-    "to their specific query? Be strict -- only include memories that the "
-    "user would need to answer this exact question. Do not include loosely "
-    "related or tangential memories.\n\n"
-    "Return ONLY the relevant memories as bullet points (- memory text).\n"
-    "If none are directly relevant, return exactly: NONE\n"
-    "No explanation, no markdown, just bullet points or NONE.";
+    "Which memories below could be useful for answering the user's query?\n"
+    "Include anything related -- preferences, facts, context.\n"
+    "When in doubt, include it.\n\n"
+    "Copy matching memories as bullet points. If nothing relevant: NONE\n\n"
+    "Example:\n"
+    "Query: tell me about my setup\n"
+    "Memories: [1] User prefers Python [2] User likes cats [3] User deploys to AWS\n"
+    "Answer:\n- User prefers Python\n- User deploys to AWS";
 
 /* ---- Pass 1: Fast extraction (thinking OFF) ---- */
 
@@ -71,29 +76,36 @@ static const char *CLEANUP_PROMPT =
 
 /* ---- Init/cleanup ---- */
 
-int llm_global_mem_agent_init(const char *memory_dir, int memory_max,
-                              const char *api_url, const char *model,
-                              const char *api_key)
+int global_mem_agent_init(server_config_t *config)
 {
-    /* Initialize the memory store (always, even without LLM) */
-    if (memory_dir) {
-        snprintf(g_memory_dir, sizeof(g_memory_dir), "%s", memory_dir);
-        g_memory_max = memory_max;
-        int count = llm_memory_init(memory_dir, memory_max);
-        g_store_ready = 1;
+    if (!config || !config->memory_enabled) return -1;
 
-        /* Initialize the agent LLM connection (optional) */
-        if (api_url) {
-            llm_global_mem_api_init(api_url, model, api_key);
-            g_agent_ready = 1;
-        }
+    const char *home = getenv("HOME");
+    char memdir[4096];
+    snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
 
-        return count;
+    snprintf(g_memory_dir, sizeof(g_memory_dir), "%s", memdir);
+    g_memory_max = config->memory_max;
+    llm_memory_init(memdir, config->memory_max);
+    g_store_ready = 1;
+
+    /* Initialize API logging */
+    char logdir[4096];
+    snprintf(logdir, sizeof(logdir), "%s/logs", memdir);
+    llm_log_init(logdir);
+
+    /* Initialize the agent LLM connection (optional) */
+    if (config->memory_api_url) {
+        llm_global_mem_api_init(config->memory_api_url,
+                                config->memory_model,
+                                config->memory_api_key);
+        g_agent_ready = 1;
     }
-    return -1;
+
+    return 0;
 }
 
-void llm_global_mem_agent_cleanup(void)
+void global_mem_agent_cleanup(void)
 {
     llm_memory_cleanup();
     llm_global_mem_api_cleanup();

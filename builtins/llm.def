@@ -80,7 +80,6 @@ $END
 #include "../lib/llm/llm_global_mem_agent.h"
 #include "../lib/llm/llm_cron_agent.h"
 #include "../lib/llm/llm_side_agent.h"
-#include "../lib/llm/llm_log.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -147,33 +146,8 @@ static int ensure_initialized(void)
     llm_tools_init();
     llm_router_init(g_servers);
 
-    /* Initialize global memory agent (owns the memory store) */
-    if (g_servers->memory_enabled) {
-        char memdir[4096];
-        const char *home = getenv("HOME");
-        snprintf(memdir, sizeof(memdir), "%s/.aibash_memories", home ? home : ".");
-
-        llm_global_mem_agent_init(memdir, g_servers->memory_max,
-                                  g_servers->memory_api_url,
-                                  g_servers->memory_model,
-                                  g_servers->memory_api_key);
-
-        /* Initialize API logging */
-        char logdir[4096];
-        snprintf(logdir, sizeof(logdir), "%s/logs", memdir);
-        llm_log_init(logdir);
-    }
-
-    /* Initialize cron agent */
-    {
-        char crondir[4096];
-        const char *home = getenv("HOME");
-        snprintf(crondir, sizeof(crondir), "%s/.aibash_cron", home ? home : ".");
-        llm_cron_agent_init(crondir);
-    }
-
-    /* Initialize side agent framework (registers all agents) */
-    side_agent_init();
+    /* Initialize all side agents (memory, cron, etc.) */
+    side_agent_init(g_servers);
 
     /* Set up streaming callbacks */
     g_stream_cbs.on_token = chat_token_cb;
