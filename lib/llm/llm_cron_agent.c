@@ -21,18 +21,16 @@ static char g_jobs_path[4096];
 /* ---- LLM Prompts ---- */
 
 static const char *SEARCH_PROMPT =
-    "You are a scheduling assistant. The user has scheduled tasks listed below.\n"
-    "Decide which tasks are relevant to the user's query.\n\n"
-    "RULES:\n"
-    "- If the query asks about schedules, reminders, upcoming tasks, or\n"
-    "  what's happening at a time/date, return the matching tasks.\n"
-    "- If the query is general like 'what is scheduled' or 'show my tasks',\n"
-    "  return ALL tasks.\n"
-    "- If the query has NOTHING to do with scheduling, time, or reminders,\n"
-    "  return exactly: NONE\n\n"
-    "For each relevant task, copy it EXACTLY as shown in the list.\n"
-    "Do not rephrase or summarize. Just copy the matching lines.\n"
-    "No explanation, just the task lines or NONE.";
+    "Return scheduled tasks relevant to the query. Copy task lines exactly.\n"
+    "If query is unrelated to time/schedules/reminders, return: NONE\n\n"
+    "Example 1:\n"
+    "Query: what is scheduled\n"
+    "Tasks: [1] daily backup at 3am\n"
+    "Answer: [1] daily backup at 3am\n\n"
+    "Example 2:\n"
+    "Query: what is my name\n"
+    "Tasks: [1] daily backup at 3am\n"
+    "Answer: NONE";
 
 static const char *EXTRACT_PROMPT =
     "You are a scheduling agent. Analyze the conversation and extract any "

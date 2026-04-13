@@ -149,8 +149,8 @@ char *side_agents_pre_query(const char *query, const char *cwd)
     for (int i = 0; i < slots_count; i++) {
         if (slots[i].result) {
             const char *name = g_agents[slots[i].agent_idx].name;
-            /* [name context]\n + result + [end name context]\n */
-            total_len += strlen(name) * 2 + strlen(slots[i].result) + 32;
+            /* ## name\n + result + \n */
+            total_len += strlen(name) + strlen(slots[i].result) + 16;
         }
     }
 
@@ -168,8 +168,8 @@ char *side_agents_pre_query(const char *query, const char *cwd)
         const char *name = g_agents[slots[i].agent_idx].name;
 
         off += snprintf(combined + off, total_len + 1 - off,
-                        "[%s context]\n%s\n[end %s context]\n",
-                        name, slots[i].result, name);
+                        "## %s\n%s\n",
+                        name, slots[i].result);
 
         /* Debug output is handled by the callback itself (e.g.,
          * stream_global_mem_agent_output in the forked child).
