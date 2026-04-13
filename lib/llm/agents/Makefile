@@ -1,0 +1,51 @@
+# Makefile for lib/llm/agents -- Side agent framework
+#
+# make          -- build libagents.a
+# make test     -- build and run tests
+
+CC = gcc
+AR = ar
+RANLIB = ranlib
+RM = rm -f
+
+CFLAGS = -g -O2 -Wall -Wextra -Wno-unused-parameter
+INCLUDES = -I.
+
+# Library
+SOURCES = side_agent.c
+OBJECTS = side_agent.o
+LIBRARY = libagents.a
+
+# Tests
+TEST_SOURCES = tests/test_main.c tests/test_side_agent.c
+TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
+TEST_BIN = tests/run_tests
+
+.SUFFIXES:
+.SUFFIXES: .c .o
+
+.c.o:
+	$(RM) $@
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+
+all: $(LIBRARY)
+
+$(LIBRARY): $(OBJECTS)
+	$(RM) $@
+	$(AR) cr $@ $(OBJECTS)
+	-$(RANLIB) $@
+
+test: $(TEST_BIN)
+	./$(TEST_BIN)
+
+$(TEST_BIN): $(TEST_OBJECTS) side_agent.o
+	$(CC) $(CFLAGS) -o $@ $^
+
+clean:
+	$(RM) $(OBJECTS) $(LIBRARY)
+	$(RM) $(TEST_OBJECTS) $(TEST_BIN)
+
+# Dependencies
+side_agent.o: side_agent.c side_agent.h
+tests/test_main.o: tests/test_main.c tests/test_harness.h
+tests/test_side_agent.o: tests/test_side_agent.c tests/test_harness.h side_agent.h
