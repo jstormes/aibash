@@ -40,22 +40,12 @@ $(LIBRARY): $(OBJECTS)
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-# For tests, recompile agents with AGENT_TESTING to stub production deps
-tests/mem_agent_test.o: mem_agent.c mem_agent.h side_agent.h
-	$(CC) -c $(CFLAGS) $(INCLUDES) -DAGENT_TESTING -o $@ $<
-
-tests/cron_agent_test.o: cron_agent.c cron_agent.h side_agent.h
-	$(CC) -c $(CFLAGS) $(INCLUDES) -DAGENT_TESTING -o $@ $<
-
-tests/calendar_agent_test.o: calendar_agent.c calendar_agent.h side_agent.h
-	$(CC) -c $(CFLAGS) $(INCLUDES) -DAGENT_TESTING -o $@ $<
-
-$(TEST_BIN): $(TEST_OBJECTS) side_agent.o tests/mem_agent_test.o tests/cron_agent_test.o tests/calendar_agent_test.o
+$(TEST_BIN): $(TEST_OBJECTS) side_agent.o mem_agent.o cron_agent.o calendar_agent.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
 	$(RM) $(OBJECTS) $(LIBRARY)
-	$(RM) $(TEST_OBJECTS) tests/mem_agent_test.o tests/cron_agent_test.o tests/calendar_agent_test.o $(TEST_BIN)
+	$(RM) $(TEST_OBJECTS) $(TEST_BIN)
 
 # Dependencies
 side_agent.o: side_agent.c side_agent.h

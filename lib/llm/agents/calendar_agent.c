@@ -68,7 +68,7 @@ int calendar_agent_init_with_deps(const char *storage_dir,
     g_has_api = (deps->api_chat != NULL);
 
     snprintf(g_storage_dir, sizeof(g_storage_dir), "%s", storage_dir);
-    snprintf(g_store_path, sizeof(g_store_path), "%s/calendar.dat", storage_dir);
+    snprintf(g_store_path, sizeof(g_store_path), "%s/calendar.ics", storage_dir);
     mkdir(storage_dir, 0755);
 
     if (g_deps.store_load)
@@ -78,34 +78,10 @@ int calendar_agent_init_with_deps(const char *storage_dir,
     return 0;
 }
 
-#ifndef AGENT_TESTING
-__attribute__((weak)) extern char *llm_global_mem_api_chat(const char *, const char *, int, const char *);
-#endif
-
 int calendar_agent_init(void *config)
 {
     (void)config;
-
-#ifdef AGENT_TESTING
-    return -1;
-#else
-    const char *home = getenv("HOME");
-    char caldir[4096];
-    snprintf(caldir, sizeof(caldir), "%s/.aibash_calendar", home ? home : ".");
-
-    calendar_agent_deps_t deps = {
-        .api_chat       = llm_global_mem_api_chat,
-        .store_load     = NULL,  /* TODO: wire libical */
-        .store_save     = NULL,
-        .store_add      = NULL,
-        .store_remove   = NULL,
-        .store_list     = NULL,
-        .store_count    = NULL,
-        .store_cleanup  = NULL,
-    };
-
-    return calendar_agent_init_with_deps(caldir, &deps);
-#endif
+    return -1;  /* production uses agents_setup.c calling init_with_deps */
 }
 
 void calendar_agent_cleanup(void)

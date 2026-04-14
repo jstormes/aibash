@@ -172,7 +172,7 @@ static void full_reset(void)
 
 static void setup_mem_agent(void)
 {
-    mem_agent_init_with_deps(&test_cfg, &mem_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mem_deps);
     side_agent_register(&(side_agent_t){
         .name = "global_memory", .timeout_sec = 5, .enabled = 1,
         .pre_query = mem_agent_pre_query,
@@ -292,7 +292,7 @@ static int test_empty_memories_no_llm_call(void)
 static int test_llm_receives_all_memories(void)
 {
     full_reset();
-    mem_agent_init_with_deps(&test_cfg, &mem_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mem_deps);
     seed_memories();
 
     g_mock_llm_response = "NONE";

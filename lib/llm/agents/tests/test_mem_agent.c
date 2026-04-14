@@ -171,35 +171,31 @@ static void reset(void)
 static int test_init_success(void)
 {
     reset();
-    int rc = mem_agent_init_with_deps(&test_config, &mock_deps);
+    int rc = mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
     TEST_ASSERT_INT_EQ(rc, 0);
     TEST_ASSERT_INT_EQ(mem_agent_ready(), 1);
-    TEST_ASSERT(mock_api_init_called, "API init should be called");
     reset();
     return 0;
 }
 
-static int test_init_disabled(void)
+static int test_init_null_deps(void)
 {
     reset();
-    test_config_t disabled = test_config;
-    disabled.memory_enabled = 0;
-    int rc = mem_agent_init_with_deps(&disabled, &mock_deps);
+    int rc = mem_agent_init_with_deps("/tmp/test", 100, NULL);
     TEST_ASSERT_INT_EQ(rc, -1);
     TEST_ASSERT_INT_EQ(mem_agent_ready(), 0);
     reset();
     return 0;
 }
 
-static int test_init_no_api_url(void)
+static int test_init_no_api(void)
 {
     reset();
-    test_config_t no_url = test_config;
-    no_url.memory_api_url = NULL;
-    int rc = mem_agent_init_with_deps(&no_url, &mock_deps);
-    /* Should still init storage, just not the LLM */
+    mem_agent_deps_t no_api = mock_deps;
+    no_api.api_chat = NULL;
+    int rc = mem_agent_init_with_deps("/tmp/test", 100, &no_api);
     TEST_ASSERT_INT_EQ(rc, 0);
-    TEST_ASSERT_INT_EQ(mem_agent_ready(), 0);
+    TEST_ASSERT_INT_EQ(mem_agent_ready(), 0);  /* store ready, but no LLM */
     reset();
     return 0;
 }
@@ -209,7 +205,7 @@ static int test_init_no_api_url(void)
 static int test_remember_and_list(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     mem_agent_remember("User prefers Python");
     mem_agent_remember("User deploys to AWS");
@@ -228,7 +224,7 @@ static int test_remember_and_list(void)
 static int test_forget_by_id(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     mem_agent_remember("first");
     mem_agent_remember("second");
@@ -248,7 +244,7 @@ static int test_forget_by_id(void)
 static int test_forget_by_match(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     mem_agent_remember("User likes Python");
     mem_agent_remember("User likes Rust");
@@ -268,7 +264,7 @@ static int test_forget_by_match(void)
 static int test_forget_nonexistent(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     int rc = mem_agent_forget(999);
     TEST_ASSERT_INT_EQ(rc, -1);
@@ -282,7 +278,7 @@ static int test_forget_nonexistent(void)
 static int test_pre_query_returns_llm_result(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
     mem_agent_remember("User prefers Python");
 
     mock_llm_response = "- User prefers Python";
@@ -299,7 +295,7 @@ static int test_pre_query_returns_llm_result(void)
 static int test_pre_query_empty_store_null(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     /* No memories saved */
     char *result = mem_agent_pre_query("anything", "/tmp");
@@ -312,7 +308,7 @@ static int test_pre_query_empty_store_null(void)
 static int test_pre_query_llm_returns_none(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
     mem_agent_remember("something");
 
     mock_llm_response = "NONE";
@@ -326,7 +322,7 @@ static int test_pre_query_llm_returns_none(void)
 static int test_pre_query_llm_returns_null(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
     mem_agent_remember("something");
 
     mock_llm_response = NULL;
@@ -342,7 +338,7 @@ static int test_pre_query_llm_returns_null(void)
 static int test_post_query_extracts_memories(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     mock_llm_response = "[{\"content\":\"User likes cats\",\"keywords\":\"cats\"}]";
     mem_agent_post_query("I like cats", "Noted!", "/tmp");
@@ -361,7 +357,7 @@ static int test_post_query_extracts_memories(void)
 static int test_post_query_empty_json(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
 
     mock_llm_response = "[]";
     mem_agent_post_query("hello", "hi", "/tmp");
@@ -375,7 +371,7 @@ static int test_post_query_empty_json(void)
 static int test_post_query_forget_operation(void)
 {
     reset();
-    mem_agent_init_with_deps(&test_config, &mock_deps);
+    mem_agent_init_with_deps("/tmp/test_mem", 100, &mock_deps);
     mem_agent_remember("old fact");
 
     mock_llm_response = "[{\"forget\":1}]";
@@ -395,8 +391,8 @@ void run_mem_agent_tests(void)
 
     /* Init/cleanup */
     RUN_TEST(test_init_success);
-    RUN_TEST(test_init_disabled);
-    RUN_TEST(test_init_no_api_url);
+    RUN_TEST(test_init_null_deps);
+    RUN_TEST(test_init_no_api);
 
     /* User commands */
     RUN_TEST(test_remember_and_list);

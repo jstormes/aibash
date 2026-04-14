@@ -5,11 +5,6 @@
 
 #include "mem_agent.h"
 
-/* Need the real config struct layout for production init */
-#ifndef AGENT_TESTING
-#include "../llm_serverconf.h"
-#endif
-
 /* ---- State ---- */
 
 static int g_store_ready = 0;
@@ -239,97 +234,38 @@ static int apply_operations(const char *json_text)
 
 /* ---- Init / cleanup ---- */
 
-int mem_agent_init_with_deps(void *config, const mem_agent_deps_t *deps)
+int mem_agent_init_with_deps(const char *storage_dir, int memory_max,
+                             const mem_agent_deps_t *deps)
 {
-    if (!deps) return -1;
+    if (!deps || !deps->mem_init || !storage_dir) return -1;
     g_deps = *deps;
 
-    if (!config) return -1;
-
-    /*
-     * The config is opaque to the framework. In production it's
-     * server_config_t. In tests it's a test struct with matching
-     * field names (accessed via the test_config_t in the test file).
-     */
-#ifdef AGENT_TESTING
-    /* Test config — simple struct defined in the test file */
-    typedef struct {
-        int memory_enabled;
-        int memory_max;
-        char *memory_api_url;
-        char *memory_model;
-        char *memory_api_key;
-    } mem_config_t;
-    mem_config_t *cfg = (mem_config_t *)config;
-#else
-    /* Production config — real server_config_t from llm_serverconf.h */
-    server_config_t *cfg = (server_config_t *)config;
-#endif
-
-    if (!cfg->memory_enabled) return -1;
-
-    /* Initialize memory store */
-    const char *home = getenv("HOME");
-    snprintf(g_memory_dir, sizeof(g_memory_dir),
-             "%s/.aibash_memories", home ? home : ".");
-    g_memory_max = cfg->memory_max;
+    snprintf(g_memory_dir, sizeof(g_memory_dir), "%s", storage_dir);
+    g_memory_max = memory_max;
 
     g_deps.mem_init(g_memory_dir, g_memory_max);
     g_store_ready = 1;
+    g_api_ready = (deps->api_chat != NULL);
 
-    /* Initialize logging if available */
     if (g_deps.log_init) {
         char logdir[4200];
         snprintf(logdir, sizeof(logdir), "%s/logs", g_memory_dir);
         g_deps.log_init(logdir);
     }
 
-    /* Initialize LLM API if configured */
-    if (cfg->memory_api_url && g_deps.api_init) {
-        g_deps.api_init(cfg->memory_api_url, cfg->memory_model, cfg->memory_api_key);
-        g_api_ready = 1;
-    }
-
     return 0;
 }
 
-/* Production dependencies — linked from libllm.a in production,
- * absent in test binary (test uses mem_agent_init_with_deps instead) */
-#ifndef AGENT_TESTING
-extern int   llm_memory_init(const char *, int);
-extern void  llm_memory_cleanup(void);
-extern int   llm_memory_save(const char *, const char *);
-extern int   llm_memory_forget(int);
-extern int   llm_memory_forget_match(const char *);
-extern char *llm_memory_list(void);
-extern int   llm_memory_count(void);
-extern int   llm_global_mem_api_init(const char *, const char *, const char *);
-extern void  llm_global_mem_api_cleanup(void);
-extern char *llm_global_mem_api_chat(const char *, const char *, int, const char *);
-extern void  llm_log_init(const char *);
-#endif
-
+/*
+ * mem_agent_init: NOT used in production.
+ * Production wiring is done by agents_setup.c calling init_with_deps().
+ * This exists only so the side_agent_t interface is satisfied if someone
+ * registers the agent with .init = mem_agent_init (e.g., in tests).
+ */
 int mem_agent_init(void *config)
 {
-#ifdef AGENT_TESTING
-    return -1;  /* tests use mem_agent_init_with_deps() */
-#else
-    mem_agent_deps_t deps = {
-        .mem_init         = llm_memory_init,
-        .mem_cleanup      = llm_memory_cleanup,
-        .mem_save         = llm_memory_save,
-        .mem_forget       = llm_memory_forget,
-        .mem_forget_match = llm_memory_forget_match,
-        .mem_list         = llm_memory_list,
-        .mem_count        = llm_memory_count,
-        .api_init         = llm_global_mem_api_init,
-        .api_cleanup      = llm_global_mem_api_cleanup,
-        .api_chat         = llm_global_mem_api_chat,
-        .log_init         = llm_log_init,
-    };
-
-    return mem_agent_init_with_deps(config, &deps);
-#endif
+    (void)config;
+    return -1;
 }
 
 void mem_agent_cleanup(void)

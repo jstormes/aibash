@@ -45,11 +45,13 @@ typedef struct {
 
 /*
  * Initialize the memory agent with explicit dependencies.
- * config: opaque pointer (cast to server_config_t in production)
+ * storage_dir: path to memory storage (e.g., ~/.aibash_memories)
+ * memory_max: max entries
  * deps: function pointers for storage, LLM, logging
  * Returns 0 on success, -1 on failure.
  */
-int mem_agent_init_with_deps(void *config, const mem_agent_deps_t *deps);
+int mem_agent_init_with_deps(const char *storage_dir, int memory_max,
+                             const mem_agent_deps_t *deps);
 
 /* Side agent callbacks */
 int   mem_agent_init(void *config);      /* uses production deps */

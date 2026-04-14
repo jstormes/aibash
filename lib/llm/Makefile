@@ -32,12 +32,12 @@ CCFLAGS = $(DEFS) $(LOCAL_CFLAGS) $(CPPFLAGS) $(CFLAGS) $(INCLUDES)
 SOURCES = llm_api.c llm_history.c llm_router.c llm_tools.c llm_exec.c \
           llm_streams.c llm_safety.c llm_serverconf.c llm_manscan.c \
           llm_shell.c llm_json_helpers.c llm_memory.c \
-          llm_global_mem_api.c llm_log.c cJSON.c
+          llm_global_mem_api.c llm_ical_store.c llm_log.c cJSON.c
 
 OBJECTS = llm_api.o llm_history.o llm_router.o llm_tools.o llm_exec.o \
           llm_streams.o llm_safety.o llm_serverconf.o llm_manscan.o \
           llm_shell.o llm_json_helpers.o llm_memory.o \
-          llm_global_mem_api.o llm_log.o cJSON.o
+          llm_global_mem_api.o llm_ical_store.o llm_log.o cJSON.o
 
 LIBRARY = libllm.a
 
@@ -87,5 +87,6 @@ llm_shell.o: llm_shell.c llm_shell.h llm_api.h llm_router.h llm_history.h agents
 llm_json_helpers.o: llm_json_helpers.c llm_json_helpers.h cJSON.h
 llm_memory.o: llm_memory.c llm_memory.h llm_streams.h cJSON.h
 llm_global_mem_api.o: llm_global_mem_api.c llm_global_mem_api.h llm_log.h cJSON.h
+llm_ical_store.o: llm_ical_store.c llm_ical_store.h
 llm_log.o: llm_log.c llm_log.h cJSON.h
 cJSON.o: cJSON.c cJSON.h
