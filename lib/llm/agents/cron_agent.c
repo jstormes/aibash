@@ -409,30 +409,29 @@ int cron_agent_ready(void)
 
 char *cron_agent_pre_query(const char *query, const char *cwd)
 {
+    (void)query;
     (void)cwd;
-    if (!g_has_api || !query || !query[0] || g_job_count == 0) return NULL;
+    if (g_job_count == 0) return NULL;
 
-    /* Build message: current time + query + job list */
+    /*
+     * No LLM filtering — just translate jobs to plain English.
+     * The cron agent's value is converting cron syntax to human-readable
+     * descriptions. The main model decides what's relevant.
+     * This is fast (<1ms), reliable, and scales to hundreds of jobs.
+     */
     char *job_list = cron_agent_list();
     if (!job_list) return NULL;
 
     time_t now = time(NULL);
-    char timestr[64];
-    strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M %Z (%A)", localtime(&now));
+    char timestr[80];
+    strftime(timestr, sizeof(timestr), "%A, %B %d %Y at %H:%M %Z", localtime(&now));
 
-    size_t len = strlen(timestr) + strlen(query) + strlen(job_list) + 128;
-    char *msg = malloc(len);
-    snprintf(msg, len, "Current time: %s\n\nQuery: %s\n\nScheduled tasks:\n%s",
-             timestr, query, job_list);
+    size_t len = strlen(timestr) + strlen(job_list) + 128;
+    char *result = malloc(len);
+    snprintf(result, len,
+             "The user's scheduled tasks (current time: %s):\n%s",
+             timestr, job_list);
     free(job_list);
-
-    char *result = g_deps.api_chat(SEARCH_PROMPT, msg, 0, "cron-search");
-    free(msg);
-
-    if (is_empty_response(result)) {
-        free(result);
-        return NULL;
-    }
 
     return result;
 }
