@@ -33,19 +33,9 @@ static int g_has_api = 0;
 
 /* ---- LLM Prompts ---- */
 
-static const char *SEARCH_PROMPT =
-    "Which scheduled tasks below could be relevant to the query?\n"
-    "Include anything related to the topic, time, or activity mentioned.\n"
-    "When in doubt, include it. Copy task lines exactly.\n"
-    "If nothing relevant: NONE\n\n"
-    "Example 1:\n"
-    "Query: what do I have coming up\n"
-    "Tasks: [1] daily backup at 3am [2] birthday Dec 15\n"
-    "Answer:\n[1] daily backup at 3am\n[2] birthday Dec 15\n\n"
-    "Example 2:\n"
-    "Query: what is my name\n"
-    "Tasks: [1] daily backup at 3am\n"
-    "Answer: NONE";
+static const char *CLASSIFY_PROMPT =
+    "Is this query about schedules, reminders, tasks, time, or events?\n"
+    "Answer only YES or NO.";
 
 static const char *EXTRACT_PROMPT =
     "You are a scheduling agent. Analyze the conversation and extract any "
@@ -409,16 +399,28 @@ int cron_agent_ready(void)
 
 char *cron_agent_pre_query(const char *query, const char *cwd)
 {
-    (void)query;
     (void)cwd;
-    if (g_job_count == 0) return NULL;
+    if (!query || !query[0] || g_job_count == 0) return NULL;
 
     /*
-     * No LLM filtering — just translate jobs to plain English.
-     * The cron agent's value is converting cron syntax to human-readable
-     * descriptions. The main model decides what's relevant.
-     * This is fast (<1ms), reliable, and scales to hundreds of jobs.
+     * Ask the LLM a simple yes/no: is this query schedule-related?
+     * If yes, inject the full English job list.
+     * If no, return NULL (saves context tokens).
      */
+    if (g_has_api) {
+        char *answer = g_deps.api_chat(CLASSIFY_PROMPT, query, 0, "cron-classify");
+        if (!answer) return NULL;
+
+        /* Check for YES */
+        const char *p = answer;
+        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+        int is_yes = (strncasecmp(p, "YES", 3) == 0);
+        free(answer);
+
+        if (!is_yes) return NULL;
+    }
+
+    /* Build the full English job list */
     char *job_list = cron_agent_list();
     if (!job_list) return NULL;
 

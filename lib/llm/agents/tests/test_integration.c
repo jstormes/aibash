@@ -76,8 +76,31 @@ static int mock_mem_count_fn(void) { return mock_mem_count; }
 /* ==== Mock LLM API ==== */
 
 static char *g_mock_llm_response = NULL;
+#define MOCK_RESPONSE_QUEUE_MAX 8
+static char *g_mock_response_queue[MOCK_RESPONSE_QUEUE_MAX];
+static int g_mock_queue_len = 0;
+static int g_mock_queue_pos = 0;
 static char *g_mock_llm_last_user_msg = NULL;
 static int g_mock_llm_call_count = 0;
+
+static void mock_queue_responses(const char **responses, int count) {
+    g_mock_queue_len = count < MOCK_RESPONSE_QUEUE_MAX ? count : MOCK_RESPONSE_QUEUE_MAX;
+    for (int i = 0; i < g_mock_queue_len; i++)
+        g_mock_response_queue[i] = (char *)responses[i];
+    g_mock_queue_pos = 0;
+}
+
+/* Per-caller mock responses (set before fork, read in child via COW) */
+static const char *g_mock_caller_names[8];
+static const char *g_mock_caller_responses[8];
+static int g_mock_caller_count = 0;
+
+static void mock_set_caller_response(const char *caller, const char *response) {
+    if (g_mock_caller_count >= 8) return;
+    g_mock_caller_names[g_mock_caller_count] = caller;
+    g_mock_caller_responses[g_mock_caller_count] = response;
+    g_mock_caller_count++;
+}
 
 static int mock_api_init(const char *u, const char *m, const char *k) { (void)u;(void)m;(void)k; return 0; }
 static void mock_api_cleanup(void) { }
@@ -86,6 +109,14 @@ static char *mock_api_chat(const char *sys, const char *user, int think, const c
     g_mock_llm_call_count++;
     free(g_mock_llm_last_user_msg);
     g_mock_llm_last_user_msg = user ? strdup(user) : NULL;
+
+    /* Check per-caller responses (works across forks since set before fork) */
+    if (caller) {
+        for (int i = 0; i < g_mock_caller_count; i++) {
+            if (g_mock_caller_names[i] && strcmp(caller, g_mock_caller_names[i]) == 0)
+                return g_mock_caller_responses[i] ? strdup(g_mock_caller_responses[i]) : NULL;
+        }
+    }
     return g_mock_llm_response ? strdup(g_mock_llm_response) : NULL;
 }
 static void mock_log_init(const char *d) { (void)d; }
@@ -125,6 +156,9 @@ static void full_reset(void)
     side_agent_cleanup();
     mock_mem_cleanup();
     g_mock_llm_response = NULL;
+    g_mock_queue_len = 0;
+    g_mock_queue_pos = 0;
+    g_mock_caller_count = 0;
     free(g_mock_llm_last_user_msg);
     g_mock_llm_last_user_msg = NULL;
     g_mock_llm_call_count = 0;
@@ -323,14 +357,14 @@ static int test_remember_then_forget(void)
  * ================================================================ */
 
 /* When user asks about 3am, the daily cleanup should appear. */
-/* Cron pre_query always injects all jobs as English — no LLM filtering. */
+/* Cron LLM classifier says YES → inject full English job list. */
 static int test_3am_query_finds_cleanup(void)
 {
     full_reset();
     setup_cron_agent();
     seed_cron_jobs();
 
-    /* No mock needed — cron pre_query doesn't call LLM */
+    g_mock_llm_response = "YES";
     char *result = side_agents_pre_query("what happens at 3am", "/tmp");
 
     TEST_ASSERT_NOT_NULL(result);
@@ -348,6 +382,7 @@ static int test_birthday_query_finds_reminder(void)
     setup_cron_agent();
     seed_cron_jobs();
 
+    g_mock_llm_response = "YES";
     char *result = side_agents_pre_query("when is the birthday", "/tmp");
 
     TEST_ASSERT_NOT_NULL(result);
@@ -358,35 +393,40 @@ static int test_birthday_query_finds_reminder(void)
     return 0;
 }
 
-/* Cron always injects — even for unrelated queries. The main model ignores irrelevant context. */
-static int test_cron_injects_for_any_query(void)
+/* Classifier says NO → cron does not inject. */
+static int test_cron_skips_unrelated_query(void)
 {
     full_reset();
     setup_cron_agent();
     seed_cron_jobs();
 
+    g_mock_llm_response = "NO";
     char *result = side_agents_pre_query("what is my name", "/tmp");
 
-    TEST_ASSERT_NOT_NULL(result);
-    TEST_ASSERT_STR_CONTAINS(result, "## cron");
-    TEST_ASSERT_STR_CONTAINS(result, "cleanup");
+    /* Only memory should inject, not cron */
+    /* result may be non-NULL from memory agent (if it returned something) */
+    if (result) {
+        /* Should NOT contain cron section */
+        TEST_ASSERT(strstr(result, "## cron") == NULL,
+                    "cron should not inject for unrelated query");
+    }
     free(result);
 
     full_reset();
     return 0;
 }
 
-/* No jobs = no output. */
+/* No jobs = no output regardless of classifier. */
 static int test_cron_empty_no_output(void)
 {
     full_reset();
     setup_cron_agent();
     /* no seed_cron_jobs() */
 
+    g_mock_llm_response = "YES";
     char *result = side_agents_pre_query("what is scheduled", "/tmp");
 
     /* Cron returns NULL when no jobs — memory agent may still return something */
-    /* Just verify no crash */
     free(result);
 
     full_reset();
@@ -454,13 +494,9 @@ static int test_both_agents_combine(void)
     setup_cron_agent();
     seed_cron_jobs();
 
-    /* The mock LLM returns different things per call:
-     * Call 1 (memory search): returns name
-     * Call 2 (cron search): returns birthday
-     * We simulate this by having the mock return both — the framework
-     * calls them serially so both get the same response. The real test
-     * is that both agents' results appear in the output. */
-    g_mock_llm_response = "- User's wife is Shanna\n[2] Wife birthday reminder";
+    /* Memory search returns wife info, cron classifier returns YES */
+    mock_set_caller_response("mem-search", "- User's wife is Shanna");
+    mock_set_caller_response("cron-classify", "YES");
     char *result = side_agents_pre_query("tell me about Shanna", "/tmp");
 
     TEST_ASSERT_NOT_NULL(result);
@@ -570,7 +606,7 @@ void run_integration_tests(void)
     /* Cron agent semantics */
     RUN_TEST(test_3am_query_finds_cleanup);
     RUN_TEST(test_birthday_query_finds_reminder);
-    RUN_TEST(test_cron_injects_for_any_query);
+    RUN_TEST(test_cron_skips_unrelated_query);
     RUN_TEST(test_cron_empty_no_output);
     RUN_TEST(test_cron_post_query_creates_job);
     RUN_TEST(test_cron_persistence);

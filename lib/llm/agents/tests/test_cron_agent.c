@@ -207,8 +207,8 @@ static int test_jobs_persist(void)
 
 /* ---- Tests: pre_query ---- */
 
-/* pre_query returns all jobs as English — no LLM filtering */
-static int test_pre_query_returns_all_jobs(void)
+/* LLM says YES → inject all jobs as English */
+static int test_pre_query_yes_injects(void)
 {
     reset();
     make_tmpdir();
@@ -216,7 +216,8 @@ static int test_pre_query_returns_all_jobs(void)
     cron_agent_add("cron", "0 3 * * *", "/tmp/cleanup.sh", "Daily cleanup");
     cron_agent_add("at", "2026-12-25 08:00", "echo hi", "Holiday reminder");
 
-    char *result = cron_agent_pre_query("anything", "/tmp");
+    mock_llm_response = "YES";
+    char *result = cron_agent_pre_query("what do I have scheduled", "/tmp");
     TEST_ASSERT_NOT_NULL(result);
     TEST_ASSERT_STR_CONTAINS(result, "Daily cleanup");
     TEST_ASSERT_STR_CONTAINS(result, "Holiday reminder");
@@ -227,6 +228,23 @@ static int test_pre_query_returns_all_jobs(void)
     return 0;
 }
 
+/* LLM says NO → return NULL */
+static int test_pre_query_no_skips(void)
+{
+    reset();
+    make_tmpdir();
+    cron_agent_init_with_deps(g_tmpdir, &mock_deps);
+    cron_agent_add("cron", "0 3 * * *", "/tmp/a.sh", "job");
+
+    mock_llm_response = "NO";
+    char *result = cron_agent_pre_query("what is my name", "/tmp");
+    TEST_ASSERT_NULL(result);
+
+    reset();
+    return 0;
+}
+
+/* No jobs → NULL regardless of LLM answer */
 static int test_pre_query_no_jobs_null(void)
 {
     reset();
@@ -235,23 +253,6 @@ static int test_pre_query_no_jobs_null(void)
 
     char *result = cron_agent_pre_query("anything", "/tmp");
     TEST_ASSERT_NULL(result);
-
-    reset();
-    return 0;
-}
-
-/* pre_query always returns jobs regardless of query content */
-static int test_pre_query_always_injects(void)
-{
-    reset();
-    make_tmpdir();
-    cron_agent_init_with_deps(g_tmpdir, &mock_deps);
-    cron_agent_add("cron", "0 3 * * *", "/tmp/a.sh", "job");
-
-    char *result = cron_agent_pre_query("what is my name", "/tmp");
-    TEST_ASSERT_NOT_NULL(result);
-    TEST_ASSERT_STR_CONTAINS(result, "job");
-    free(result);
 
     reset();
     return 0;
@@ -329,9 +330,9 @@ void run_cron_agent_tests(void)
     RUN_TEST(test_jobs_persist);
 
     /* Pre-query */
-    RUN_TEST(test_pre_query_returns_all_jobs);
+    RUN_TEST(test_pre_query_yes_injects);
+    RUN_TEST(test_pre_query_no_skips);
     RUN_TEST(test_pre_query_no_jobs_null);
-    RUN_TEST(test_pre_query_always_injects);
 
     /* Post-query */
     RUN_TEST(test_post_query_extracts_job);

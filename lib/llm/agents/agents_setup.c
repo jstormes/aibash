@@ -15,10 +15,10 @@ void agents_setup(void *config)
         .post_query  = mem_agent_post_query,
     });
 
-    /* Register cron agent (pre_query is instant — no LLM call) */
+    /* Register cron agent */
     side_agent_register(&(side_agent_t){
         .name        = "cron",
-        .timeout_sec = 2,
+        .timeout_sec = 15,
         .init        = cron_agent_init,
         .cleanup     = cron_agent_cleanup,
         .pre_query   = cron_agent_pre_query,
