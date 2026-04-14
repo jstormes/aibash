@@ -5,6 +5,11 @@
 
 #include "mem_agent.h"
 
+/* Need the real config struct layout for production init */
+#ifndef AGENT_TESTING
+#include "../llm_serverconf.h"
+#endif
+
 /* ---- State ---- */
 
 static int g_store_ready = 0;
@@ -239,12 +244,15 @@ int mem_agent_init_with_deps(void *config, const mem_agent_deps_t *deps)
     if (!deps) return -1;
     g_deps = *deps;
 
+    if (!config) return -1;
+
     /*
-     * The config is opaque to the framework. The agent knows its structure.
-     * We access memory_enabled, memory_max, memory_api_url, etc.
-     * In production this is server_config_t. In tests it's test_config_t.
-     * Both have the same field layout for the fields we access.
+     * The config is opaque to the framework. In production it's
+     * server_config_t. In tests it's a test struct with matching
+     * field names (accessed via the test_config_t in the test file).
      */
+#ifdef AGENT_TESTING
+    /* Test config — simple struct defined in the test file */
     typedef struct {
         int memory_enabled;
         int memory_max;
@@ -252,9 +260,11 @@ int mem_agent_init_with_deps(void *config, const mem_agent_deps_t *deps)
         char *memory_model;
         char *memory_api_key;
     } mem_config_t;
-
-    if (!config) return -1;
     mem_config_t *cfg = (mem_config_t *)config;
+#else
+    /* Production config — real server_config_t from llm_serverconf.h */
+    server_config_t *cfg = (server_config_t *)config;
+#endif
 
     if (!cfg->memory_enabled) return -1;
 
