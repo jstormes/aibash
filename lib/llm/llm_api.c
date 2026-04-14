@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <unistd.h>
+#include <sys/select.h>
 #include <time.h>
 #include <curl/curl.h>
 
@@ -67,6 +69,40 @@ extern volatile sig_atomic_t interrupt_state;
 
 static void spinner_stop(void);
 
+/*
+ * Check for ESC key without blocking.
+ * Uses select() on stdin with zero timeout to poll for input,
+ * then reads one byte to check if it's ESC (0x1B).
+ * Returns 1 if ESC detected, 0 otherwise.
+ */
+static int check_esc_key(void)
+{
+    fd_set fds;
+    struct timeval tv = {0, 0};  /* zero timeout = non-blocking poll */
+
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+
+    if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
+        unsigned char c;
+        if (read(STDIN_FILENO, &c, 1) == 1 && c == 0x1B) {
+            /* Consume any trailing escape sequence bytes (e.g., arrow keys
+             * send ESC [ A which is 3 bytes — drain them so they don't
+             * appear as garbage at the next prompt) */
+            tv.tv_usec = 10000;  /* 10ms to catch trailing bytes */
+            while (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
+                if (read(STDIN_FILENO, &c, 1) != 1) break;
+                FD_ZERO(&fds);
+                FD_SET(STDIN_FILENO, &fds);
+                tv.tv_sec = 0;
+                tv.tv_usec = 10000;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                              curl_off_t ultotal, curl_off_t ulnow)
 {
@@ -75,6 +111,13 @@ static int curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
     if (interrupt_state) {
         spinner_stop();
         return 1; /* non-zero aborts the transfer */
+    }
+
+    /* Check for ESC key press to cancel */
+    if (check_esc_key()) {
+        spinner_stop();
+        interrupt_state = 1;
+        return 1;
     }
 
     if (g_spinner_active) {
