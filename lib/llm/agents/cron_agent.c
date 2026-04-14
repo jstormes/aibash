@@ -49,19 +49,19 @@ static const char *SEARCH_PROMPT =
 
 static const char *EXTRACT_PROMPT =
     "You are a scheduling agent. Analyze the conversation and extract any "
-    "requests to schedule recurring or one-time tasks.\n\n"
+    "NEW requests from the USER to schedule tasks.\n\n"
     "RULES:\n"
-    "1. Only extract EXPLICIT scheduling requests\n"
-    "2. If nothing to schedule, return: []\n"
-    "3. Output RAW JSON only. No markdown, no code fences, no explanation.\n\n"
-    "For recurring tasks, use type \"cron\" with a 5-field cron schedule:\n"
-    "  minute hour day-of-month month day-of-week\n"
-    "For one-time tasks, use type \"at\" with a datetime string.\n\n"
+    "1. Only extract EXPLICIT NEW scheduling requests from the USER\n"
+    "2. If nothing new to schedule, return: []\n"
+    "3. Output RAW JSON only. No markdown, no code fences, no explanation.\n"
+    "4. Do NOT re-create tasks the assistant mentioned from existing schedules\n"
+    "5. Only the USER can request scheduling, not the assistant\n\n"
     "FORMAT:\n"
     "[{\"type\": \"cron\", \"schedule\": \"0 3 * * *\", "
     "\"command\": \"shell command\", \"description\": \"human description\"}]\n\n"
-    "DO NOT schedule: questions about schedules, casual mentions of time.\n"
-    "DO schedule: explicit requests like 'run X every day at Y', "
+    "DO NOT schedule: questions about schedules, assistant responses,\n"
+    "casual mentions of time, or tasks already scheduled.\n"
+    "DO schedule: explicit NEW requests like 'run X every day at Y', "
     "'remind me on DATE', 'schedule a backup at TIME'.";
 
 /* ---- Storage helpers ---- */
