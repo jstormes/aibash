@@ -27,15 +27,17 @@ static const char *SEARCH_PROMPT =
 
 static const char *EXTRACT_PROMPT =
     "You are a memory extraction agent. Analyze the conversation and extract "
-    "facts worth remembering. Output ONLY a valid JSON array.\n\n"
+    "NEW facts the user shared. Output ONLY a valid JSON array.\n\n"
     "RULES:\n"
     "1. Use third person: \"User prefers...\" not \"I prefer...\"\n"
-    "2. If nothing worth saving, return: []\n"
+    "2. If nothing NEW worth saving, return: []\n"
     "3. Output RAW JSON only. No markdown, no code fences, no explanation.\n"
-    "4. If the user asks to forget something, use {\"forget\": ID}\n\n"
+    "4. Do NOT extract facts the assistant already stated — those are known.\n"
+    "5. Only extract facts the USER explicitly shared or requested.\n\n"
     "FORMAT: [{\"content\": \"...\", \"keywords\": \"comma,separated\"}]\n\n"
-    "DO NOT save: command outputs, file contents, directory listings, errors.\n"
-    "DO save: name, role, preferences, habits, project details, tech choices.";
+    "DO NOT save: command outputs, file contents, directory listings, errors,\n"
+    "assistant responses, or facts the assistant mentioned from memory.\n"
+    "DO save: NEW name, role, preferences, habits, project details, tech choices.";
 
 static const char *CLEANUP_PROMPT =
     "You are a memory cleanup agent. Review the current memories and fix "
@@ -396,11 +398,12 @@ void mem_agent_post_query(const char *query, const char *response, const char *c
     char *conversation = malloc(conv_len);
     snprintf(conversation, conv_len, "User: %s\nAssistant: %s", query, response);
 
-    /* Pass 1: Fast extraction (thinking OFF) */
+    /* Pass 1: Fast extraction (thinking OFF)
+     * Only send the conversation — NOT existing memories.
+     * Including memories causes the model to re-extract known facts
+     * from the assistant's response (which echoes memory context). */
     {
-        char *prompt = build_prompt_with_memories("Conversation:\n", conversation);
-        char *resp = g_deps.api_chat(EXTRACT_PROMPT, prompt, 0, "extract");
-        free(prompt);
+        char *resp = g_deps.api_chat(EXTRACT_PROMPT, conversation, 0, "extract");
 
         if (resp) {
             apply_operations(resp);
