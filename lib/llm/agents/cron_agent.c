@@ -34,8 +34,11 @@ static int g_has_api = 0;
 /* ---- LLM Prompts ---- */
 
 static const char *CLASSIFY_PROMPT =
-    "Is this query about schedules, reminders, tasks, time, or events?\n"
-    "Answer only YES or NO.";
+    "Does this query relate to scheduled tasks, reminders, cron jobs,\n"
+    "upcoming events, or anything time-based? Answer YES or NO.\n\n"
+    "YES examples: what is scheduled, anything coming up, what happens at 3am,\n"
+    "when is the birthday, do I have tasks, anything soon, upcoming\n"
+    "NO examples: what is my name, list files, describe my tech stack";
 
 static const char *EXTRACT_PROMPT =
     "You are a scheduling agent. Analyze the conversation and extract any "

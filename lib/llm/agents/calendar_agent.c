@@ -18,8 +18,11 @@ static calendar_agent_deps_t g_deps;
 /* ---- LLM Prompts ---- */
 
 static const char *CLASSIFY_PROMPT =
-    "Is this query about calendar events, meetings, appointments, or plans?\n"
-    "Answer only YES or NO.";
+    "Does this query relate to calendar events, meetings, appointments,\n"
+    "upcoming plans, or anything time-based? Answer YES or NO.\n\n"
+    "YES examples: what meetings do I have, anything coming up, scheduled soon,\n"
+    "when is the dentist, do I have plans, anything tomorrow, upcoming\n"
+    "NO examples: what is my name, list files, describe my tech stack";
 
 static const char *EXTRACT_PROMPT =
     "Extract NEW calendar events from the USER's message only.\n\n"
