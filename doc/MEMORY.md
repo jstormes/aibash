@@ -11,40 +11,32 @@ LLM agent and builtins never access the memory store directly -- the agent
 is the sole owner of memory data.
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                    User Query                         │
-│                                                       │
-│  ┌──────────────────────────────────────┐             │
-│  │ Side Agent Framework                 │             │
-│  │                                      │             │
-│  │ PRE-QUERY: Global Memory Agent       │             │
-│  │  (forked child, calls memory LLM)    │             │
-│  │  Sends all memories + query          │             │
-│  │  Returns only DIRECTLY relevant ones │             │
-│  │  (2-5 sec, 5 sec timeout)            │             │
-│  └──────────────┬───────────────────────┘             │
-│                  ▼                                     │
-│       [global_memory context] injected                │
-│       into system prompt                              │
-│                  │                                     │
-│                  ▼                                     │
-│       Main Agent (ai server)                          │
-│       responds to user (no memory access)             │
-│                  │                                     │
-│                  ▼                                     │
-│  ┌──────────────────────────────────────┐             │
-│  │ Side Agent Framework                 │             │
-│  │                                      │             │
-│  │ POST-QUERY: Global Memory Agent      │             │
-│  │  (double-forked, user doesn't wait)  │             │
-│  │                                      │             │
-│  │  Pass 1: Extract facts (thinking off)│             │
-│  │  Pass 2: Cleanup (thinking on)       │             │
-│  │    - Split compound entries          │             │
-│  │    - Resolve conflicts               │             │
-│  │    - Remove duplicates               │             │
-│  └──────────────────────────────────────┘             │
-└──────────────────────────────────────────────────────┘
+User query
+  |
+  |-- Side Agent Framework (serial fork/pipe)
+  |     |
+  |     |-- Memory Agent PRE-QUERY:
+  |     |     LLM searches memories for relevant facts
+  |     |     Injects as ## global_memory section
+  |     |
+  |     |-- Cron Agent PRE-QUERY:
+  |     |     LLM classifies: schedule-related? YES/NO
+  |     |     If YES: injects ## cron section (English job list)
+  |     |
+  |-- ## sections injected into system prompt
+  |
+  |-- Main Agent responds (uses ## context, no direct memory access)
+  |
+  |-- Side Agent Framework (double-fork, background)
+        |
+        |-- Memory Agent POST-QUERY:
+        |     Extracts NEW facts from user input only
+        |     (does NOT see existing memories or injected context)
+        |     Pass 1: fast extraction (thinking off)
+        |     Pass 2: cleanup (thinking on)
+        |
+        |-- Cron Agent POST-QUERY:
+              Detects scheduling requests, creates cron/at jobs
 ```
 
 ## Quick Setup
@@ -110,12 +102,13 @@ LLM initialized: ai (Qwen3.5-122B), 2762 man pages, 10 memories
 
 The memory system enforces a strict boundary:
 
-- **Global memory agent** (`llm_global_mem_agent.c`): Sole owner of the
-  memory store. Handles all reads, writes, searches, and cleanup.
-- **Side agent framework** (`llm_side_agent.c`): Manages fork/pipe/select
+- **Memory agent** (`agents/mem_agent.c`): Sole owner of the memory store.
+  Handles all reads, writes, searches, and cleanup. Dependencies injected
+  for testability.
+- **Side agent framework** (`agents/side_agent.c`): Manages fork/pipe/select
   plumbing for pre-query and post-query callbacks.
-- **Main agent** (`llm_api.c`): Only receives injected `[global_memory context]`
-  blocks. Has no memory tools and cannot access memory data.
+- **Main agent** (`llm_api.c`): Only receives injected `## global_memory`
+  sections. Has no memory tools and cannot access memory data.
 - **Builtins** (`llm.def`): User commands (`remember`, `forget`, `memories`)
   call the agent's public API, never the storage layer directly.
 
@@ -136,7 +129,7 @@ the user never waits.
 
 **Automatic context injection:** Before each query, the pre-query side
 agent searches memories via LLM and injects relevant ones into the system
-prompt as a `[global_memory context]` block.
+prompt as a `## global_memory` section.
 
 **User commands:**
 ```bash
@@ -293,10 +286,13 @@ Labels:
 
 | File | Description |
 |------|-------------|
-| `lib/llm/llm_side_agent.c/.h` | Side agent framework (generic) |
-| `lib/llm/llm_global_mem_agent.c/.h` | Global memory agent (owns memory store) |
-| `lib/llm/llm_global_mem_api.c/.h` | Memory agent LLM client |
-| `lib/llm/llm_memory.c/.h` | Memory store (private to agent) |
+| `lib/llm/agents/side_agent.c/.h` | Side agent framework (tested) |
+| `lib/llm/agents/mem_agent.c/.h` | Memory agent (dependency-injected, tested) |
+| `lib/llm/agents/cron_agent.c/.h` | Cron agent (classify + translate, tested) |
+| `lib/llm/agents/agents_setup.c` | Agent registration and initialization |
+| `lib/llm/agents/tests/` | 56 tests, 121 assertions |
+| `lib/llm/llm_memory.c/.h` | Memory store (private to memory agent) |
+| `lib/llm/llm_global_mem_api.c/.h` | Side agent LLM client |
 
 ## Troubleshooting
 
@@ -307,8 +303,8 @@ Labels:
 
 **Memory search timing out:**
 - Memory server may be overloaded or slow
-- Default timeout is 5 seconds (SIDE_AGENT_DEFAULT_TIMEOUT)
-- Check server logs for errors
+- Default timeout is 15 seconds
+- Check `~/.aibash_memories/logs/` for `mem-search` and `cron-classify` logs
 
 **Memories not splitting:**
 - The cleanup pass (thinking ON) handles splitting

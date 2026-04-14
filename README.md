@@ -275,31 +275,35 @@ aibash includes a persistent long-term memory system managed by the
 
 The global memory side agent has two roles:
 
-**Pre-query (search):** Before each LLM call, the agent forks a child
-process that sends all memories + the user's query to a small LLM. The
-LLM returns only memories that DIRECTLY relate to the query. These are
-injected into the main agent's system prompt as `[global_memory context]`.
+**Pre-query (search):** Before each LLM call, the agent searches
+memories relevant to the user's query via a small LLM. Matching
+memories are injected into the main agent's system prompt as a
+`## global_memory` section.
 
-**Post-query (extraction):** After each conversation, a background process
-extracts facts worth remembering using a two-pass approach:
-- Pass 1 (thinking off): Quick scan, extract obvious facts
+**Post-query (extraction):** After each conversation, a background
+process extracts NEW facts from the user's input (not the assistant's
+response) using a two-pass approach:
+- Pass 1 (thinking off): Extract new facts only
 - Pass 2 (thinking on): Split compound entries, resolve conflicts, deduplicate
+
+The extraction agent only sees the raw conversation, not existing
+memories or injected context. This prevents feedback loops where
+the agent re-saves facts the main model echoed back.
 
 ```
 $ llm remember my name is James
 Remembered: my name is James
 
-$ llm I prefer Python for scripts and deploy to AWS
-# → main agent responds, then background extraction auto-saves:
-#   [3] User prefers Python for scripts
-#   [4] User deploys to AWS
+$ llm describe my tech stack
+# → memory agent injects: Python, AWS, Docker, MySQL, DevOps
+Based on your global memory, your tech stack includes:
+  Python, Rust (learning), AWS us-east-1, Docker, MySQL
 
-# Later, even in a new session:
-$ llm what do you know about me
-# → [global-mem] searching memories...
-# → [global-mem] - My name is James Stormes
-# → [global-mem] - I work as a DevOps engineer
-You are James Stormes, a DevOps engineer who prefers Python...
+$ llm memories    # no duplicates created
+[1] My name is James Stormes
+[5] I work as a DevOps engineer
+[6] I prefer Python for scripting
+...
 ```
 
 ### Memory Commands
@@ -316,15 +320,47 @@ You are James Stormes, a DevOps engineer who prefers Python...
 All commands go through the global memory agent. The main LLM agent
 has no memory tools -- it only receives context via the side agent.
 
+### Cron Side Agent
+
+The cron side agent manages scheduled tasks (cron jobs and at jobs).
+
+**Pre-query:** A small LLM classifies the query as schedule-related
+(YES/NO). If YES, the agent translates all cron jobs to plain English
+and injects them as a `## cron` section. The main model uses this
+context to answer schedule questions directly.
+
+**Post-query:** Detects new scheduling requests from the user and
+creates cron/at jobs automatically.
+
+```
+$ llm what do I have scheduled
+You have two scheduled tasks:
+1. Every day at 3:00 AM — Daily log cleanup
+2. December 15, 2026 at 8:00 AM — Birthday reminder for Shanna
+
+$ llm cron
+[1] Every day at 3:00: Daily log cleanup (runs: /tmp/cleanup.sh)
+[2] 2026-12-15 08:00: Reminder for wife Shanna birthday (runs: echo ...)
+
+$ llm cron remove 1
+Removed scheduled task #1
+```
+
 ### Side Agent Framework
 
-The memory system is built on a generic **side agent framework** that
-handles all fork/pipe/select/reap plumbing. Each side agent can have:
-- A `pre_query` callback (forked child, pipe results back with timeout)
-- A `post_query` callback (double-forked grandchild, fire-and-forget)
+Both agents are built on a tested **side agent framework**
+(`lib/llm/agents/`) that handles fork/pipe/select/SIGPIPE plumbing.
+Each side agent provides:
+- `init(config)` — setup storage, LLM connection
+- `pre_query(query, cwd)` — inject context before the main LLM call
+- `post_query(query, response, cwd)` — background work after the response
+- `cleanup()` — free resources
 
-Adding new side agents (e.g., cron reminders, local directory context)
-requires only writing callbacks and registering them.
+Agents are registered in `agents_setup.c` and initialized with the
+server config. The framework runs them serially in forked child
+processes. Adding new agents requires writing callbacks and registering.
+
+Run `cd lib/llm/agents && make test` for the test suite (56 tests).
 
 ### Configuration
 
@@ -383,13 +419,17 @@ the simplest local setup with OpenAI-compatible API and tool calling.
 The LLM integration is implemented as:
 
 - **`lib/llm/`** -- Self-contained library (`libllm.a`) with the API client,
-  tool system, agentic loop, side agent framework, and memory system.
+  tool system, agentic loop, and supporting modules.
   - `llm_api.c` -- Main agent: curl/SSE streaming, tool call parsing
-  - `llm_side_agent.c` -- Side agent framework: registry, fork/pipe/select, double-fork
-  - `llm_global_mem_agent.c` -- Global memory agent: search, extraction, cleanup
-  - `llm_global_mem_api.c` -- Memory agent LLM client (separate curl connection)
-  - `llm_memory.c` -- Memory store (private to global memory agent)
   - `llm_shell.c` -- Agentic loop, side agent integration
+  - `llm_memory.c` -- Memory store (private to memory agent)
+  - `llm_global_mem_api.c` -- Side agent LLM client (separate curl connection)
+- **`lib/llm/agents/`** -- Side agent framework and agents (tested independently).
+  - `side_agent.c` -- Framework: registry, fork/pipe/select, SIGPIPE fix
+  - `mem_agent.c` -- Memory agent: search, extraction, cleanup
+  - `cron_agent.c` -- Cron agent: classify, translate, schedule management
+  - `agents_setup.c` -- Registration and initialization
+  - `tests/` -- 56 tests, 121 assertions (`make test`)
 - **`builtins/llm.def`**, **`llm_init.def`**, **`llm_config.def`** -- Thin
   bash builtin wrappers that bridge bash's `WORD_LIST` interface to the
   library's string-based API.
