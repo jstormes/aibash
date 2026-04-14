@@ -23,7 +23,7 @@ $PRODUCES llm.c
 $BUILTIN llm
 $DEPENDS_ON HAVE_LLM
 $FUNCTION llm_builtin
-$SHORT_DOC llm [-c] [query ...] | remember | forget | memories | cleanup | cron
+$SHORT_DOC llm [-c] [query ...] | remember | forget | memories | cleanup | cron | calendar
 Send a query to an LLM and run the agentic tool loop.
 
 Options:
@@ -40,6 +40,11 @@ Cron subcommands:
   cron              list scheduled tasks
   cron list         list scheduled tasks
   cron remove <id>  remove a scheduled task
+
+Calendar subcommands:
+  calendar              list calendar events
+  calendar list         list calendar events
+  calendar remove <id>  remove a calendar event
 
 Concatenates arguments into a query and sends it to the configured
 LLM server. The LLM can call tools (ls, cat, grep, run, man,
@@ -81,6 +86,7 @@ $END
 #include "../lib/llm/agents/side_agent.h"
 #include "../lib/llm/agents/mem_agent.h"
 #include "../lib/llm/agents/cron_agent.h"
+#include "../lib/llm/agents/calendar_agent.h"
 #include "../lib/llm/llm_streams.h"
 #include "../lib/llm/llm_serverconf.h"
 #include "../lib/llm/llm_router.h"
@@ -293,6 +299,32 @@ llm_builtin (WORD_LIST *list)
                 return (EXECUTION_SUCCESS);
             }
             builtin_error("unknown cron subcommand: %s (use: list, remove)", sub);
+            return (EXECUTION_FAILURE);
+        }
+
+        if (strcmp(cmd, "calendar") == 0) {
+            list = list->next;
+            if (!list || strcmp(list->word->word, "list") == 0) {
+                char *events = calendar_agent_list();
+                printf("%s", events);
+                free(events);
+                return (EXECUTION_SUCCESS);
+            }
+            const char *sub = list->word->word;
+            if (strcmp(sub, "remove") == 0) {
+                list = list->next;
+                if (!list) {
+                    builtin_error("calendar remove requires an ID");
+                    return (EXECUTION_FAILURE);
+                }
+                int id = atoi(list->word->word);
+                if (calendar_agent_remove(id) == 0)
+                    printf("Removed calendar event #%d\n", id);
+                else
+                    builtin_error("event #%d not found", id);
+                return (EXECUTION_SUCCESS);
+            }
+            builtin_error("unknown calendar subcommand: %s (use: list, remove)", sub);
             return (EXECUTION_FAILURE);
         }
 

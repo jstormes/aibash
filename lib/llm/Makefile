@@ -1,7 +1,8 @@
 # Makefile for lib/llm -- LLM integration library for bash
 #
 # This builds libllm.a containing the LLM API client, tool system,
-# agentic loop, and supporting modules.
+# agentic loop, and supporting modules. Side agents are built in
+# the agents/ subdirectory and merged into libllm.a.
 
 srcdir = .
 
@@ -56,8 +57,8 @@ $(LIBRARY): $(OBJECTS) agents/libagents.a
 	$(RM) $@
 	$(AR) $(ARFLAGS) $@ $(OBJECTS)
 	cd agents && $(AR) x libagents.a && mv *.o .. && cd ..
-	$(AR) $(ARFLAGS) $@ agents_setup.o side_agent.o mem_agent.o cron_agent.o
-	$(RM) agents_setup.o side_agent.o mem_agent.o cron_agent.o
+	$(AR) $(ARFLAGS) $@ agents_setup.o side_agent.o mem_agent.o cron_agent.o calendar_agent.o
+	$(RM) agents_setup.o side_agent.o mem_agent.o cron_agent.o calendar_agent.o
 	-$(RANLIB) $@
 
 test:
@@ -73,7 +74,7 @@ distclean maintainer-clean: clean
 	$(RM) Makefile
 
 # Dependencies
-llm_api.o: llm_api.c llm_api.h llm_history.h llm_config.h llm_streams.h cJSON.h
+llm_api.o: llm_api.c llm_api.h llm_history.h llm_config.h llm_streams.h agents/side_agent.h cJSON.h
 llm_history.o: llm_history.c llm_history.h llm_api.h llm_config.h cJSON.h
 llm_router.o: llm_router.c llm_router.h llm_api.h llm_tools.h llm_exec.h llm_safety.h llm_streams.h llm_manscan.h llm_config.h llm_serverconf.h cJSON.h
 llm_tools.o: llm_tools.c llm_tools.h llm_manscan.h llm_streams.h llm_config.h cJSON.h
@@ -84,5 +85,7 @@ llm_serverconf.o: llm_serverconf.c llm_serverconf.h llm_config.h llm_streams.h
 llm_manscan.o: llm_manscan.c llm_manscan.h llm_streams.h
 llm_shell.o: llm_shell.c llm_shell.h llm_api.h llm_router.h llm_history.h agents/side_agent.h llm_streams.h llm_serverconf.h cJSON.h
 llm_json_helpers.o: llm_json_helpers.c llm_json_helpers.h cJSON.h
+llm_memory.o: llm_memory.c llm_memory.h llm_streams.h cJSON.h
 llm_global_mem_api.o: llm_global_mem_api.c llm_global_mem_api.h llm_log.h cJSON.h
+llm_log.o: llm_log.c llm_log.h cJSON.h
 cJSON.o: cJSON.c cJSON.h

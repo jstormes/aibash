@@ -751,6 +751,7 @@ AR
 INSTALL_DATA
 INSTALL_SCRIPT
 INSTALL_PROGRAM
+LIBICAL_LIB
 CURL_LIB
 LLM_DEP
 LLM_LIB
@@ -6079,6 +6080,63 @@ if test "$have_curl" = "yes"; then
 else
 	as_fn_error $? "libcurl is required for aibash. Install libcurl4-openssl-dev (Debian/Ubuntu) or libcurl-devel (Fedora/RHEL)." "$LINENO" 5
 fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for icalcomponent_new in -lical" >&5
+printf %s "checking for icalcomponent_new in -lical... " >&6; }
+if test ${ac_cv_lib_ical_icalcomponent_new+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lical  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char icalcomponent_new (void);
+int
+main (void)
+{
+return icalcomponent_new ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_ical_icalcomponent_new=yes
+else case e in #(
+  e) ac_cv_lib_ical_icalcomponent_new=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_ical_icalcomponent_new" >&5
+printf "%s\n" "$ac_cv_lib_ical_icalcomponent_new" >&6; }
+if test "x$ac_cv_lib_ical_icalcomponent_new" = xyes
+then :
+  have_ical=yes
+else case e in #(
+  e) have_ical=no ;;
+esac
+fi
+
+if test "$have_ical" = "yes"; then
+	LIBICAL_LIB=-lical
+else
+	as_fn_error $? "libical is required for aibash. Install libical-dev (Debian/Ubuntu) or libical-devel (Fedora/RHEL)." "$LINENO" 5
+fi
+
 
 
 
@@ -9422,8 +9480,8 @@ rm -f core conftest.err conftest.$ac_objext conftest.beam \
         LIBS=$save_LIBS
         test $gl_pthread_api = yes && break
       done
-      echo "$as_me:9425: gl_pthread_api=$gl_pthread_api" >&5
-      echo "$as_me:9426: LIBPTHREAD=$LIBPTHREAD" >&5
+      echo "$as_me:9483: gl_pthread_api=$gl_pthread_api" >&5
+      echo "$as_me:9484: LIBPTHREAD=$LIBPTHREAD" >&5
 
       gl_pthread_in_glibc=no
       # On Linux with glibc >= 2.34, libc contains the fully functional
@@ -9449,7 +9507,7 @@ rm -rf conftest*
 
           ;;
       esac
-      echo "$as_me:9452: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
+      echo "$as_me:9510: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
 
       # Test for libpthread by looking for pthread_kill. (Not pthread_self,
       # since it is defined as a macro on OSF/1.)
@@ -9627,7 +9685,7 @@ fi
 
         fi
       fi
-      echo "$as_me:9630: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
+      echo "$as_me:9688: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
     fi
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether POSIX threads API is available" >&5
 printf %s "checking whether POSIX threads API is available... " >&6; }
@@ -9874,8 +9932,8 @@ rm -f core conftest.err conftest.$ac_objext conftest.beam \
         LIBS=$save_LIBS
         test $gl_pthread_api = yes && break
       done
-      echo "$as_me:9877: gl_pthread_api=$gl_pthread_api" >&5
-      echo "$as_me:9878: LIBPTHREAD=$LIBPTHREAD" >&5
+      echo "$as_me:9935: gl_pthread_api=$gl_pthread_api" >&5
+      echo "$as_me:9936: LIBPTHREAD=$LIBPTHREAD" >&5
 
       gl_pthread_in_glibc=no
       # On Linux with glibc >= 2.34, libc contains the fully functional
@@ -9901,7 +9959,7 @@ rm -rf conftest*
 
           ;;
       esac
-      echo "$as_me:9904: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
+      echo "$as_me:9962: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
 
       # Test for libpthread by looking for pthread_kill. (Not pthread_self,
       # since it is defined as a macro on OSF/1.)
@@ -10079,7 +10137,7 @@ fi
 
         fi
       fi
-      echo "$as_me:10082: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
+      echo "$as_me:10140: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
     fi
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether POSIX threads API is available" >&5
 printf %s "checking whether POSIX threads API is available... " >&6; }

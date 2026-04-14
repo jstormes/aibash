@@ -696,9 +696,17 @@ if test "$have_curl" = "yes"; then
 else
 	AC_MSG_ERROR([libcurl is required for aibash. Install libcurl4-openssl-dev (Debian/Ubuntu) or libcurl-devel (Fedora/RHEL).])
 fi
+dnl libical is required for aibash calendar agent
+AC_CHECK_LIB(ical, icalcomponent_new, [have_ical=yes], [have_ical=no])
+if test "$have_ical" = "yes"; then
+	LIBICAL_LIB=-lical
+else
+	AC_MSG_ERROR([libical is required for aibash. Install libical-dev (Debian/Ubuntu) or libical-devel (Fedora/RHEL).])
+fi
 AC_SUBST(LLM_LIB)
 AC_SUBST(LLM_DEP)
 AC_SUBST(CURL_LIB)
+AC_SUBST(LIBICAL_LIB)
 dnl END LLM LIBRARY SECTION
 
 dnl programs needed by the build and install process
